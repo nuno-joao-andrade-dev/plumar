@@ -158,13 +158,44 @@ ollama pull gemma4
 ```
 
 ### 3. Installation
+
+You can install and run Plumar either locally within the project folder or globally on your system to run it from any location.
+
+#### Option A: Local Installation
 Install the project dependencies (done in the workspace root):
 ```bash
 npm install
 ```
 
+#### Option B: Global Installation (Use from Any Location) 🌟
+You can deploy `plumar-cli` globally on your machine using the built-in global deployment script. This allows you to run `plumar` or `plumar-cli` commands from any directory!
+
+1. Make sure you are in the project root directory.
+2. Run the global deployment script:
+   ```bash
+   ./deploy-global.sh
+   ```
+   This script will verify your prerequisites and guide you through the interactive options:
+   * **Development Link (`npm link`)**: Symlinks this directory globally (perfect for local development/modifications).
+   * **Clean Global Install (`npm install -g .`)**: Installs a copy of the current folder directly to your global node modules.
+   * **Distribution Tarball (`npm pack`)**: Packs and installs a clean tarball globally.
+
+   You can also run the deployment script directly in non-interactive mode using flags:
+   ```bash
+   ./deploy-global.sh --global     # Standard global installation
+   ./deploy-global.sh --link       # Symlink for local development
+   ./deploy-global.sh --pack       # Create tarball and install
+   ./deploy-global.sh --uninstall  # Uninstall global deployment
+   ```
+
+3. Once installed, verify the installation and start Plumar from any directory using:
+   ```bash
+   plumar
+   ```
+   *(or `plumar-cli`)*
+
 ### 4. Run the Chat Application
-Start the interactive CLI session:
+If you opted for a local installation, start the interactive CLI session from the workspace root:
 ```bash
 npm start
 ```
