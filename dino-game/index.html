@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plumar Dino Game</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-color: #0d0e15;
+      --panel-bg: rgba(20, 22, 37, 0.7);
+      --border-color: rgba(0, 242, 254, 0.3);
+      --primary: #00f2fe;
+      --secondary: #4facfe;
+      --accent-neon: #ff007f;
+      --text: #f0f3f9;
+      --shadow: 0 0 20px rgba(0, 242, 254, 0.4);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text);
+      font-family: 'Rajdhani', sans-serif;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(79, 172, 254, 0.1) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(255, 0, 127, 0.1) 0px, transparent 50%);
+    }
+
+    #game-container {
+      width: 100%;
+      max-width: 900px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 15px;
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    h1 {
+      font-family: 'Press Start 2P', monospace;
+      font-size: 1.5rem;
+      color: var(--primary);
+      text-shadow: var(--shadow);
+      letter-spacing: -1px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    h1 span {
+      color: var(--accent-neon);
+      text-shadow: 0 0 20px rgba(255, 0, 127, 0.6);
+    }
+
+    .hud {
+      font-family: 'Press Start 2P', monospace;
+      font-size: 0.9rem;
+      display: flex;
+      gap: 25px;
+      background: var(--panel-bg);
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    }
+
+    .hud-label {
+      color: rgba(240, 243, 249, 0.6);
+      font-size: 0.7rem;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+    }
+
+    .hud-val {
+      color: var(--primary);
+      text-shadow: 0 0 8px rgba(0, 242, 254, 0.5);
+    }
+
+    #canvas-wrapper {
+      position: relative;
+      width: 100%;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid var(--border-color);
+      box-shadow: var(--shadow);
+      background: #121320;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      aspect-ratio: 16 / 6;
+    }
+
+    .controls-panel {
+      margin-top: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 15px;
+      width: 100%;
+      max-width: 800px;
+    }
+
+    .control-card {
+      background: var(--panel-bg);
+      border: 1px solid rgba(240, 243, 249, 0.1);
+      border-radius: 8px;
+      padding: 10px 15px;
+      flex: 1;
+      min-width: 180px;
+      text-align: center;
+      backdrop-filter: blur(10px);
+    }
+
+    .control-card h3 {
+      font-size: 1.1rem;
+      color: var(--secondary);
+      margin-bottom: 5px;
+    }
+
+    .key-badge {
+      background: #1e213a;
+      border: 1px solid var(--primary);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-family: monospace;
+      font-weight: bold;
+      color: var(--primary);
+      box-shadow: 0 0 5px rgba(0, 242, 254, 0.2);
+    }
+
+    .game-modes {
+      display: flex;
+      gap: 10px;
+      margin-top: 15px;
+    }
+
+    .mode-btn {
+      background: rgba(30, 33, 58, 0.6);
+      border: 1px solid rgba(0, 242, 254, 0.3);
+      color: var(--text);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-family: 'Rajdhani', sans-serif;
+      font-weight: bold;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .mode-btn:hover {
+      background: rgba(0, 242, 254, 0.2);
+      border-color: var(--primary);
+      box-shadow: 0 0 10px rgba(0, 242, 254, 0.3);
+    }
+
+    .mode-btn.active {
+      background: linear-gradient(135deg, var(--secondary), var(--primary));
+      color: #0d0e15;
+      border-color: var(--primary);
+      box-shadow: 0 0 15px rgba(0, 242, 254, 0.5);
+    }
+
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(13, 14, 21, 0.85);
+      backdrop-filter: blur(5px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      transition: opacity 0.3s ease;
+    }
+
+    #overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .overlay-title {
+      font-family: 'Press Start 2P', monospace;
+      font-size: 2rem;
+      color: var(--accent-neon);
+      text-shadow: 0 0 25px rgba(255, 0, 127, 0.8);
+      margin-bottom: 20px;
+      text-align: center;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); text-shadow: 0 0 20px rgba(255, 0, 127, 0.6); }
+      50% { transform: scale(1.03); text-shadow: 0 0 35px rgba(255, 0, 127, 0.9); }
+      100% { transform: scale(1); text-shadow: 0 0 20px rgba(255, 0, 127, 0.6); }
+    }
+
+    .start-btn {
+      background: linear-gradient(135deg, #00f2fe, #4facfe);
+      color: #0d0e15;
+      border: none;
+      padding: 15px 40px;
+      font-family: 'Press Start 2P', monospace;
+      font-size: 1rem;
+      border-radius: 50px;
+      cursor: pointer;
+      box-shadow: 0 0 25px rgba(0, 242, 254, 0.5);
+      transition: all 0.3s ease;
+      text-transform: uppercase;
+    }
+
+    .start-btn:hover {
+      transform: translateY(-3px) scale(1.05);
+      box-shadow: 0 0 35px rgba(0, 242, 254, 0.8);
+    }
+
+    .overlay-instructions {
+      margin-top: 25px;
+      text-align: center;
+      font-size: 1.1rem;
+      color: rgba(240, 243, 249, 0.7);
+      max-width: 500px;
+      line-height: 1.6;
+    }
+
+    .footer {
+      margin-top: 30px;
+      color: rgba(240, 243, 249, 0.4);
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .footer a {
+      color: var(--primary);
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="game-container">
+    <header>
+      <h1>PLUMAR <span>DINO</span></h1>
+      <div class="hud">
+        <div>
+          <div class="hud-label">Score</div>
+          <div id="score-val" class="hud-val">00000</div>
+        </div>
+        <div>
+          <div class="hud-label">High Score</div>
+          <div id="highscore-val" class="hud-val">00000</div>
+        </div>
+      </div>
+    </header>
+
+    <div id="canvas-wrapper">
+      <div id="overlay">
+        <h2 class="overlay-title" id="overlay-msg">SPACE DINO</h2>
+        <button class="start-btn" id="start-btn">Start Game</button>
+        <div class="overlay-instructions" id="overlay-instructions">
+          Press <span class="key-badge">Space</span> or <span class="key-badge">↑</span> to jump.<br>
+          Press <span class="key-badge">Shift</span> or <span class="key-badge">F</span> to <strong>Flip Gravity</strong>!
+        </div>
+      </div>
+      <canvas id="gameCanvas" width="1600" height="600"></canvas>
+    </div>
+
+    <div class="game-modes">
+      <button class="mode-btn active" id="mode-classic">Standard Gravity</button>
+      <button class="mode-btn" id="mode-low">Low Gravity</button>
+      <button class="mode-btn" id="mode-flip">Gravity Flip</button>
+    </div>
+
+    <div class="controls-panel">
+      <div class="control-card">
+        <h3>Jump / Flapped Jump</h3>
+        <p><span class="key-badge">Space</span> or <span class="key-badge">↑ Arrow</span></p>
+      </div>
+      <div class="control-card">
+        <h3>Duck / Dive Down</h3>
+        <p><span class="key-badge">↓ Arrow</span></p>
+      </div>
+      <div class="control-card">
+        <h3>Flip Gravity</h3>
+        <p><span class="key-badge">Shift</span> or <span class="key-badge">F</span></p>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <span>Powered by</span> <a href="https://github.com/nandrade/plumar-cli" target="_blank">plumar-cli AI CLI Engine</a>
+    </footer>
+  </div>
+
+  <script>
+    // --- Audio Sound Synthesizer via Web Audio API ---
+    let audioCtx = null;
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+    }
+
+    function playSound(type) {
+      if (!audioCtx) return;
+      // Resume audio context if suspended (browser safety)
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      const now = audioCtx.currentTime;
+
+      if (type === 'jump') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.exponentialRampToValueAtTime(700, now + 0.12);
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+        osc.start();
+        osc.stop(now + 0.12);
+      } else if (type === 'flip') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.exponentialRampToValueAtTime(220, now + 0.15);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+        osc.start();
+        osc.stop(now + 0.15);
+      } else if (type === 'milestone') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(587.33, now); // D5
+        osc.frequency.setValueAtTime(880.00, now + 0.08); // A5
+        gain.gain.setValueAtTime(0.06, now);
+        gain.gain.setValueAtTime(0.06, now + 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+        osc.start();
+        osc.stop(now + 0.25);
+      } else if (type === 'crash') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(120, now);
+        osc.frequency.linearRampToValueAtTime(30, now + 0.35);
+        gain.gain.setValueAtTime(0.25, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+        osc.start();
+        osc.stop(now + 0.4);
+      }
+    }
+
+    // --- Game Engine Implementation ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const overlay = document.getElementById('overlay');
+    const overlayMsg = document.getElementById('overlay-msg');
+    const overlayInstructions = document.getElementById('overlay-instructions');
+    const startBtn = document.getElementById('start-btn');
+    const scoreVal = document.getElementById('score-val');
+    const highscoreVal = document.getElementById('highscore-val');
+
+    const btnClassic = document.getElementById('mode-classic');
+    const btnLow = document.getElementById('mode-low');
+    const btnFlip = document.getElementById('mode-flip');
+
+    // High Score tracking
+    let highScore = parseInt(localStorage.getItem('plumar_cli_high_score') || '0', 10);
+    highscoreVal.textContent = highScore.toString().padStart(5, '0');
+
+    // Modes: 'classic' | 'low' | 'flip'
+    let gameMode = 'classic'; 
+
+    // Settings
+    const BASE_GRAVITY = 0.8;
+    const JUMP_FORCE = -17;
+    const GAME_SPEED_START = 8;
+    const MAX_GAME_SPEED = 20;
+
+    let isPlaying = false;
+    let score = 0;
+    let gameSpeed = GAME_SPEED_START;
+    let animationId = null;
+
+    // Keys state
+    const keys = {};
+
+    // Star backdrop
+    const stars = [];
+    function initStars() {
+      stars.length = 0;
+      for (let i = 0; i < 60; i++) {
+        stars.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          size: Math.random() * 2 + 0.5,
+          speed: Math.random() * 0.8 + 0.2
+        });
+      }
+    }
+
+    // Dino Object
+    const dino = {
+      x: 150,
+      y: 420,
+      width: 70,
+      height: 80,
+      vy: 0,
+      isJumping: false,
+      isDucking: false,
+      gravitySide: 1, // 1 = floor, -1 = ceiling (for gravity flip mode)
+      glowColor: '#00f2fe',
+      legStep: 0,
+      
+      reset() {
+        this.y = 420;
+        this.vy = 0;
+        this.isJumping = false;
+        this.isDucking = false;
+        this.gravitySide = 1;
+        this.glowColor = gameMode === 'flip' ? '#ff007f' : (gameMode === 'low' ? '#a015ff' : '#00f2fe');
+      },
+
+      getGravity() {
+        if (gameMode === 'low') return BASE_GRAVITY * 0.32;
+        return BASE_GRAVITY;
+      },
+
+      getJumpForce() {
+        if (gameMode === 'low') return JUMP_FORCE * 0.75;
+        return JUMP_FORCE;
+      },
+
+      update() {
+        // Legs cycling animation
+        if (isPlaying && !this.isJumping) {
+          this.legStep = (this.legStep + 0.2) % (Math.PI * 2);
+        }
+
+        // Apply Gravity
+        const g = this.getGravity() * this.gravitySide;
+        this.vy += g;
+        this.y += this.vy;
+
+        // Ground / Ceiling constraints
+        const floorY = canvas.height - 100 - this.height;
+        const ceilingY = 100;
+
+        if (this.gravitySide === 1) {
+          // Classic bottom orientation
+          if (this.y >= floorY) {
+            this.y = floorY;
+            this.vy = 0;
+            this.isJumping = false;
+          }
+        } else {
+          // Inverted top orientation
+          if (this.y <= ceilingY) {
+            this.y = ceilingY;
+            this.vy = 0;
+            this.isJumping = false;
+          }
+        }
+      },
+
+      jump() {
+        if (!this.isJumping) {
+          playSound('jump');
+          // Force is negative for classic, positive for inverted gravity
+          this.vy = this.getJumpForce() * this.gravitySide;
+          this.isJumping = true;
+          // Spawn leap sparks
+          spawnParticles(this.x + this.width / 2, this.gravitySide === 1 ? this.y + this.height : this.y, this.glowColor, 8);
+        }
+      },
+
+      flipGravity() {
+        if (gameMode !== 'flip') return;
+        playSound('flip');
+        this.gravitySide *= -1;
+        this.isJumping = true;
+        this.glowColor = this.gravitySide === 1 ? '#00f2fe' : '#ff007f';
+        spawnParticles(this.x + this.width / 2, this.y + this.height / 2, '#4facfe', 15);
+      },
+
+      draw() {
+        ctx.save();
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = this.glowColor;
+        ctx.fillStyle = this.glowColor;
+
+        // Translate and optionally flip vertically
+        ctx.translate(this.x, this.y);
+        if (this.gravitySide === -1) {
+          ctx.translate(0, this.height);
+          ctx.scale(1, -1);
+        }
+
+        // Draw a premium neon geometric dinosaur
+        ctx.beginPath();
+        if (this.isDucking) {
+          // Ducking shape
+          ctx.moveTo(10, 50);
+          ctx.lineTo(50, 40);
+          ctx.lineTo(80, 40);
+          ctx.lineTo(85, 55);
+          ctx.lineTo(60, 80);
+          ctx.lineTo(10, 80);
+        } else {
+          // Cute standing space T-Rex outline
+          ctx.moveTo(15, 40); // tail start
+          ctx.lineTo(5, 20);  // tail end
+          ctx.lineTo(15, 35);
+          ctx.lineTo(35, 30); // back
+          ctx.lineTo(35, 5);  // neck
+          ctx.lineTo(60, 5);  // head top
+          ctx.lineTo(60, 20); // snout
+          ctx.lineTo(45, 25); // jaw
+          ctx.lineTo(45, 35); // throat
+          ctx.lineTo(55, 45); // chest
+          ctx.lineTo(40, 70); // hips
+          ctx.lineTo(20, 70);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        // Eye (red laser or dark contrast)
+        ctx.fillStyle = '#0d0e15';
+        if (this.isDucking) {
+          ctx.fillRect(70, 45, 6, 6);
+        } else {
+          ctx.fillRect(48, 8, 6, 6);
+        }
+
+        // Leg animations
+        ctx.strokeStyle = this.glowColor;
+        ctx.lineWidth = 4;
+        const leftLegOffset = Math.sin(this.legStep) * 12;
+        const rightLegOffset = -Math.sin(this.legStep) * 12;
+
+        if (this.isJumping) {
+          // Bent legs
+          ctx.beginPath();
+          ctx.moveTo(25, 70); ctx.lineTo(20, 80); ctx.lineTo(30, 80);
+          ctx.moveTo(35, 70); ctx.lineTo(30, 80); ctx.lineTo(40, 80);
+          ctx.stroke();
+        } else if (this.isDucking) {
+          // Short walking legs
+          ctx.beginPath();
+          ctx.moveTo(25, 80); ctx.lineTo(25 + leftLegOffset / 2, 85);
+          ctx.moveTo(45, 80); ctx.lineTo(45 + rightLegOffset / 2, 85);
+          ctx.stroke();
+        } else {
+          // Standing walking legs
+          ctx.beginPath();
+          ctx.moveTo(25, 70); ctx.lineTo(20 + leftLegOffset, 80);
+          ctx.moveTo(35, 70); ctx.lineTo(40 + rightLegOffset, 80);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      }
+    };
+
+    // Obstacles Pool
+    const obstacles = [];
+    class Obstacle {
+      constructor() {
+        this.width = 30 + Math.random() * 40;
+        this.height = 40 + Math.random() * 55;
+        this.x = canvas.width + 100;
+        
+        // Decide if floor or ceiling obstacle
+        this.side = (gameMode === 'flip' && Math.random() > 0.5) ? -1 : 1;
+        
+        if (this.side === 1) {
+          this.y = canvas.height - 100 - this.height;
+        } else {
+          this.y = 100;
+        }
+
+        // Glowing styles based on obstacle type
+        const colors = ['#ff007f', '#ffaa00', '#00ff66', '#ff0055'];
+        this.color = colors[Math.floor(Math.random() * colors.length)];
+        this.isPterodactyl = Math.random() > 0.75 && gameMode !== 'low';
+        
+        if (this.isPterodactyl) {
+          this.width = 60;
+          this.height = 40;
+          // Flying height varies
+          const offsets = [130, 200, 260];
+          const offset = offsets[Math.floor(Math.random() * offsets.length)];
+          this.y = this.side === 1 ? canvas.height - offset : offset;
+          this.wingCycle = 0;
+        }
+      }
+
+      update() {
+        this.x -= gameSpeed;
+        if (this.isPterodactyl) {
+          this.wingCycle += 0.15;
+        }
+      }
+
+      draw() {
+        ctx.save();
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = this.color;
+        ctx.fillStyle = this.color;
+
+        if (this.isPterodactyl) {
+          // Draw winged beast
+          ctx.translate(this.x, this.y);
+          if (this.side === -1) {
+            ctx.scale(1, -1);
+          }
+          ctx.beginPath();
+          ctx.moveTo(10, 20);
+          ctx.lineTo(30, 15);
+          // Wings
+          const wingY = Math.sin(this.wingCycle) * 20;
+          ctx.lineTo(40, 20 + wingY);
+          ctx.lineTo(45, 15);
+          ctx.lineTo(50, 20 - wingY);
+          ctx.lineTo(60, 20); // beak
+          ctx.lineTo(45, 28);
+          ctx.lineTo(30, 25);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          // Space Crystals/Spikes
+          ctx.translate(this.x, this.y);
+          if (this.side === -1) {
+            ctx.translate(0, this.height);
+            ctx.scale(1, -1);
+          }
+          ctx.beginPath();
+          // Draw a cool spiked cluster
+          ctx.moveTo(0, this.height);
+          ctx.lineTo(this.width * 0.2, this.height * 0.4);
+          ctx.lineTo(this.width * 0.4, 0); // Main spire
+          ctx.lineTo(this.width * 0.6, this.height * 0.2);
+          ctx.lineTo(this.width * 0.8, this.height * 0.5);
+          ctx.lineTo(this.width, this.height);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+    }
+
+    // Particle FX
+    const particles = [];
+    function spawnParticles(x, y, color, count = 10) {
+      for (let i = 0; i < count; i++) {
+        particles.push({
+          x,
+          y,
+          vx: (Math.random() - 0.5) * 8 - 2, // Drift slightly backward
+          vy: (Math.random() - 0.5) * 8,
+          radius: Math.random() * 3 + 1,
+          alpha: 1,
+          decay: Math.random() * 0.03 + 0.015,
+          color
+        });
+      }
+    }
+
+    function updateParticles() {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.alpha -= p.decay;
+        if (p.alpha <= 0) {
+          particles.splice(i, 1);
+        }
+      }
+    }
+
+    function drawParticles() {
+      particles.forEach(p => {
+        ctx.save();
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+    }
+
+    // Spawn mechanism
+    let obstacleTimer = 0;
+    function handleObstacles() {
+      obstacleTimer++;
+      // Min gap decreases as speed increases
+      const minInterval = Math.max(50, 110 - Math.floor(gameSpeed * 2.5));
+      if (obstacleTimer > minInterval + Math.random() * 80) {
+        obstacles.push(new Obstacle());
+        obstacleTimer = 0;
+      }
+
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        const obs = obstacles[i];
+        obs.update();
+        obs.draw();
+
+        // Check Collision with high precision bounding box
+        if (checkCollision(dino, obs)) {
+          gameOver();
+        }
+
+        // Remove offscreen
+        if (obs.x < -100) {
+          obstacles.splice(i, 1);
+        }
+      }
+    }
+
+    function checkCollision(r1, r2) {
+      // Small inset padding for tighter collision hitboxes
+      const paddingX = 8;
+      const paddingY = 8;
+      
+      return (
+        r1.x + paddingX < r2.x + r2.width &&
+        r1.x + r1.width - paddingX > r2.x &&
+        r1.y + paddingY < r2.y + r2.height &&
+        r1.y + r1.height - paddingY > r2.y
+      );
+    }
+
+    // Draw grid floors and ceilings
+    let gridOffset = 0;
+    function drawGridLines() {
+      gridOffset = (gridOffset + gameSpeed) % 40;
+
+      // Bottom Floor Grid
+      ctx.strokeStyle = 'rgba(0, 242, 254, 0.4)';
+      ctx.lineWidth = 3;
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = '#00f2fe';
+      ctx.beginPath();
+      ctx.moveTo(0, canvas.height - 100);
+      ctx.lineTo(canvas.width, canvas.height - 100);
+      ctx.stroke();
+
+      // Floor decorative perspective lines
+      ctx.strokeStyle = 'rgba(0, 242, 254, 0.15)';
+      ctx.lineWidth = 1.5;
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      for (let x = -gridOffset; x < canvas.width; x += 40) {
+        ctx.moveTo(x, canvas.height - 100);
+        ctx.lineTo(x - 30, canvas.height);
+      }
+      ctx.stroke();
+
+      // Top Ceiling Grid (Visible in Gravity Flip Mode)
+      if (gameMode === 'flip') {
+        ctx.strokeStyle = 'rgba(255, 0, 127, 0.4)';
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#ff007f';
+        ctx.beginPath();
+        ctx.moveTo(0, 100);
+        ctx.lineTo(canvas.width, 100);
+        ctx.stroke();
+
+        // Ceiling lines
+        ctx.strokeStyle = 'rgba(255, 0, 127, 0.15)';
+        ctx.lineWidth = 1.5;
+        ctx.shadowBlur = 0;
+        ctx.beginPath();
+        for (let x = -gridOffset; x < canvas.width; x += 40) {
+          ctx.moveTo(x, 100);
+          ctx.lineTo(x - 30, 0);
+        }
+        ctx.stroke();
+      }
+    }
+
+    function updateScore() {
+      score += 0.15;
+      const displayScore = Math.floor(score);
+      scoreVal.textContent = displayScore.toString().padStart(5, '0');
+
+      // Milestone beep every 100 points
+      if (displayScore > 0 && displayScore % 100 === 0 && Math.floor(score - 0.15) % 100 !== Math.floor(score) % 100) {
+        playSound('milestone');
+        gameSpeed = Math.min(MAX_GAME_SPEED, gameSpeed + 0.8);
+      }
+    }
+
+    function gameLoop() {
+      if (!isPlaying) return;
+
+      // Draw background
+      ctx.fillStyle = '#0d0e15';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Starfield parallax
+      ctx.fillStyle = '#ffffff';
+      stars.forEach(star => {
+        star.x -= star.speed;
+        if (star.x < 0) star.x = canvas.width;
+        ctx.fillRect(star.x, star.y, star.size, star.size);
+      });
+
+      // Grid Lines
+      drawGridLines();
+
+      // Particles
+      updateParticles();
+      drawParticles();
+
+      // Dino
+      dino.update();
+      dino.draw();
+
+      // Obstacles
+      handleObstacles();
+
+      // Score
+      updateScore();
+
+      animationId = requestAnimationFrame(gameLoop);
+    }
+
+    function startGame() {
+      initAudio();
+      isPlaying = true;
+      score = 0;
+      gameSpeed = GAME_SPEED_START;
+      obstacles.length = 0;
+      particles.length = 0;
+      dino.reset();
+      initStars();
+      overlay.classList.add('hidden');
+      
+      if (animationId) cancelAnimationFrame(animationId);
+      gameLoop();
+    }
+
+    function gameOver() {
+      isPlaying = false;
+      playSound('crash');
+      cancelAnimationFrame(animationId);
+      
+      // Update high score
+      const finalScore = Math.floor(score);
+      if (finalScore > highScore) {
+        highScore = finalScore;
+        localStorage.setItem('plumar_cli_high_score', highScore);
+        highscoreVal.textContent = highScore.toString().padStart(5, '0');
+      }
+
+      // Explode the Dino!
+      spawnParticles(dino.x + dino.width / 2, dino.y + dino.height / 2, dino.glowColor, 35);
+      
+      // Flash screen red
+      ctx.fillStyle = 'rgba(255, 0, 127, 0.4)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Redraw everything once to capture crash particles
+      ctx.fillStyle = '#0d0e15';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      drawGridLines();
+      drawParticles();
+      obstacles.forEach(o => o.draw());
+
+      // Show Overlay
+      overlayMsg.textContent = "GAME OVER";
+      startBtn.textContent = "Replay";
+      overlay.classList.remove('hidden');
+    }
+
+    // --- Inputs Handling ---
+    window.addEventListener('keydown', e => {
+      initAudio();
+      keys[e.key] = true;
+
+      if (!isPlaying) return;
+
+      if (e.key === ' ' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        // Jump action
+        if (dino.gravitySide === 1) {
+          if (dino.y >= canvas.height - 100 - dino.height) dino.jump();
+        } else {
+          if (dino.y <= 100) dino.jump();
+        }
+      }
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        dino.isDucking = true;
+        // High gravity downward slam if jumping
+        if (dino.isJumping) {
+          dino.vy += 8 * dino.gravitySide;
+        }
+      }
+
+      if (e.key === 'Shift' || e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        dino.flipGravity();
+      }
+    });
+
+    window.addEventListener('keyup', e => {
+      keys[e.key] = false;
+      if (e.key === 'ArrowDown') {
+        dino.isDucking = false;
+      }
+    });
+
+    startBtn.addEventListener('click', () => {
+      startGame();
+    });
+
+    // Touch/click events on Canvas container to trigger jump or flip
+    canvas.addEventListener('pointerdown', e => {
+      initAudio();
+      if (!isPlaying) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      
+      if (gameMode === 'flip') {
+        dino.flipGravity();
+      } else {
+        dino.jump();
+      }
+    });
+
+    // Mode Buttons Click
+    function setMode(mode) {
+      gameMode = mode;
+      btnClassic.classList.remove('active');
+      btnLow.classList.remove('active');
+      btnFlip.classList.remove('active');
+
+      if (mode === 'classic') {
+        btnClassic.classList.add('active');
+        overlayInstructions.innerHTML = `Press <span class="key-badge">Space</span> or <span class="key-badge">↑</span> to jump.<br>Avoid neon obstacles on the track.`;
+      } else if (mode === 'low') {
+        btnLow.classList.add('active');
+        overlayInstructions.innerHTML = `Press <span class="key-badge">Space</span> or <span class="key-badge">↑</span> to jump.<br>Enjoy <strong>low gravity</strong> floaty glide flight!`;
+      } else if (mode === 'flip') {
+        btnFlip.classList.add('active');
+        overlayInstructions.innerHTML = `Press <span class="key-badge">Space</span> or <span class="key-badge">↑</span> to jump.<br>Press <span class="key-badge">Shift</span> or <span class="key-badge">F</span> to <strong>Flip Gravity</strong>!`;
+      }
+
+      if (!isPlaying) {
+        dino.reset();
+        // Clear background
+        ctx.fillStyle = '#0d0e15';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        initStars();
+        stars.forEach(star => {
+          ctx.fillRect(star.x, star.y, star.size, star.size);
+        });
+        drawGridLines();
+        dino.draw();
+      } else {
+        // Restart with new mode
+        startGame();
+      }
+    }
+
+    btnClassic.addEventListener('click', () => setMode('classic'));
+    btnLow.addEventListener('click', () => setMode('low'));
+    btnFlip.addEventListener('click', () => setMode('flip'));
+
+    // Draw initial idle frame
+    initStars();
+    ctx.fillStyle = '#0d0e15';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    stars.forEach(star => {
+      ctx.fillRect(star.x, star.y, star.size, star.size);
+    });
+    drawGridLines();
+    dino.draw();
+
+  </script>
+</body>
+</html>
