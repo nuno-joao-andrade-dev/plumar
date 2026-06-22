@@ -78,11 +78,24 @@ You can deploy `plumar-cli` globally on your machine using the built-in global d
    ```
    *(or `plumar-cli`)*
 
+### Option C: Direct Installation from GitHub 🌐
+
+If you don't have the source code cloned locally or want a quick one-step global installation straight from the official repository, you can install Plumar directly using `npm`:
+
+```bash
+npm install -g https://github.com/nuno-joao-andrade-dev/plumar
+```
+
+This will fetch the code, install dependencies, and register the global `plumar` and `plumar-cli` commands. Once complete, you can start the application from any folder on your machine:
+```bash
+plumar
+```
+
 ---
 
 ## 🚀 4. Launching the Agent Chat
 
-If you opted for a local installation, start the interactive CLI session from the workspace root:
+If you opted for local installation, start the interactive CLI session from the workspace root:
 
 ```bash
 npm start

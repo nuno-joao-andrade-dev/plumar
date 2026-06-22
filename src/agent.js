@@ -558,6 +558,31 @@ export function detectAndParseTextToolCalls(text) {
     foundCalls.push({ name, args, rawMatch: match[0] });
   }
 
+  // 2.5 Match <function=tool_name>arguments</tool_call> or <function=tool_name>arguments</function>
+  const functionTagRegex = /<function=["']?([a-zA-Z0-9_-]+)["']?\s*>([\s\S]*?)(?:<\/function>|<\/tool_call>)/gi;
+  while ((match = functionTagRegex.exec(text)) !== null) {
+    const name = match[1].trim();
+    const rawArgs = match[2].trim();
+    let args = {};
+    try {
+      if (rawArgs && rawArgs.trim()) {
+        args = JSON.parse(rawArgs);
+        if (args && typeof args === 'object') {
+          if (args.arguments && typeof args.arguments === 'object') {
+            args = args.arguments;
+          } else if (args.args && typeof args.args === 'object') {
+            args = args.args;
+          } else if (args.parameters && typeof args.parameters === 'object') {
+            args = args.parameters;
+          }
+        }
+      }
+    } catch (e) {
+      // Ignore invalid JSON parsing in tag content
+    }
+    foundCalls.push({ name, args, rawMatch: match[0] });
+  }
+
   // 3. Match markdown JSON/raw code blocks
   const markdownRegex = /```(?:json)?\s*([\s\S]*?)```/gi;
   while ((match = markdownRegex.exec(text)) !== null) {
@@ -1192,6 +1217,15 @@ When the user asks to generate or create an image file (e.g., "generate an image
 1. **TEXT-ONLY LIMITATION (REQUIRED)**: You are a text-only model. You cannot natively generate images or output raw/Base64 image data. Therefore, you MUST NOT attempt to call the \`generateImage\` tool or any other tool to create an image, and you must NOT output raw image data. Instead, you MUST explicitly state in your response that you cannot generate images because you are a text-only model.
 `;
   }
+
+  // Append standard guidance on background execution
+  systemPrompt += `
+
+### Background Process and Execution Guidance
+When the user asks you to "execute in background", "run in background", "start the background service", "start the server", or perform a task in the background:
+1. **YOU CAN RUN BACKGROUND COMMANDS**: You have the full ability to run shell commands, applications, and services in the background using the \`executeCommand\` tool. To do so, invoke \`executeCommand\` with standard shell background operators (for example, appending \` &\` to the shell command, or using \`nohup <command> > background.log 2>&1 &\`).
+2. **DO NOT REFUSE**: Never refuse background execution requests by claiming you do not have graphical/process management access or a background execution environment. You run inside a Linux terminal workspace environment with standard process management capability via \`executeCommand\`.
+`;
 
   const agent = new LlmAgent({
     name: modeKey,

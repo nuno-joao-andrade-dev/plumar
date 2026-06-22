@@ -373,6 +373,38 @@ test('Agent Integration Suite (Real-World Use Cases)', async (t) => {
     assert.ok(res.text.includes('Result is 20.'));
   });
 
+  await t.test('Use Case 9.5: Text-based tool call fallback function tag style', async () => {
+    const sessionId = 'test-usecase-9-5-function-tags';
+
+    // 1. Tool call with <function=toolName>
+    mockFetchResponses.push({
+      json: {
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: 'Listing workspace files. <function=listFiles>  </tool_call> Finished.'
+          }
+        }]
+      }
+    });
+
+    // 2. Response after tool executes
+    mockFetchResponses.push({
+      json: {
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: 'Found files in the workspace.'
+          }
+        }]
+      }
+    });
+
+    const res = await runAgentTurn(sessionId, 'list the files in the workspace', 'gemma4:latest', 'balanced');
+    assert.ok(res.text.includes('Listing workspace files.'));
+    assert.ok(res.text.includes('Found files in the workspace.'));
+  });
+
   await t.test('Use Case 10: Verbose JSON logging control', async () => {
     const originalValue = isVerboseJsonEnabled();
     try {
@@ -840,6 +872,58 @@ test('Agent Integration Suite (Real-World Use Cases)', async (t) => {
     assert.ok(tokens.input > 0, 'Estimated input tokens should be greater than 0');
     assert.ok(tokens.output > 0, 'Estimated output tokens should be greater than 0');
     assert.strictEqual(tokens.total, tokens.input + tokens.output, 'Total tokens should equal input plus output');
+  });
+
+  await t.test('Use Case 15: Should include Background Process and Execution Guidance in systemPrompt', async () => {
+    // We capture the systemPrompt by hooking into LlmAgent
+    mockFetchResponses.push({
+      json: {
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: 'Background execution guidance checked!'
+          }
+        }]
+      }
+    });
+
+    const previousFetch = globalThis.fetch;
+    let capturedSystemPrompt = '';
+
+    globalThis.fetch = async (url, options) => {
+      if (url.endsWith('/api/chat')) {
+        const body = JSON.parse(options.body);
+        const systemMsg = body.messages.find(m => msg => msg.role === 'system' || m.role === 'system');
+        if (systemMsg) {
+          capturedSystemPrompt = systemMsg.content;
+        } else {
+          // If messages array has system prompt in another structure, extract it
+          const firstMsg = body.messages[0];
+          if (firstMsg && firstMsg.role === 'system') {
+            capturedSystemPrompt = firstMsg.content;
+          }
+        }
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          message: {
+            role: 'assistant',
+            content: 'Success'
+          },
+          prompt_eval_count: 10,
+          eval_count: 5
+        })
+      };
+    };
+
+    try {
+      await runAgentTurn('test-bg-prompt', 'execute task in background', 'gemma4:latest', 'balanced');
+      assert.ok(capturedSystemPrompt.includes('Background Process and Execution Guidance'), 'System prompt should include background guidance');
+      assert.ok(capturedSystemPrompt.includes('YOU CAN RUN BACKGROUND COMMANDS'), 'System prompt should explain background execution capabilities');
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
   });
 });
 
