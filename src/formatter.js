@@ -185,14 +185,26 @@ if (typeof process !== 'undefined' && process.stdin && typeof process.stdin.emit
 import pc from 'picocolors';
 import { marked } from 'marked';
 import TerminalRenderer from 'marked-terminal';
-import { initLip, Lipgloss } from 'charsm';
 
+let initLip = null;
+let Lipgloss = null;
 let lipInstance = null;
 let isLipInitialized = false;
 
 export async function initializeFormatter() {
   if (isLipInitialized) return;
+
+  // Only attempt to load and initialize charsm if running on supported x86_64 architectures
+  // (since charsm bundles x86_64 native binary libraries)
+  if (process.arch !== 'x64' || (process.platform !== 'linux' && process.platform !== 'win32')) {
+    return;
+  }
+
   try {
+    const charsmModule = await import('charsm');
+    initLip = charsmModule.initLip;
+    Lipgloss = charsmModule.Lipgloss;
+
     const success = await initLip();
     if (success) {
       lipInstance = new Lipgloss();
