@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatChatResponse } from '../src/formatter.js';
+import { formatChatResponse, printModelSelection } from '../src/formatter.js';
 
 test('Formatter JSON Output Suite', async (t) => {
   await t.test('formatChatResponse: should bypass non-JSON plain text', () => {
@@ -127,5 +127,39 @@ Please review it carefully!`;
     const bottomBorderLine = lines.find(line => line.includes('└'));
     assert.ok(bottomBorderLine, 'Table bottom border line should exist');
     assert.ok(bottomBorderLine.includes('┘'), 'Table bottom border line should be complete on a single line');
+  });
+
+  await t.test('printModelSelection: should print models and characteristics correctly', () => {
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (...args) => logs.push(args.join(' '));
+
+    try {
+      const mockModels = [
+        {
+          name: 'gemma4:latest',
+          size: 4800000000,
+          details: {
+            family: 'llama',
+            parameter_size: '9B',
+            quantization_level: 'Q4_K_M'
+          }
+        },
+        'codegemma:latest'
+      ];
+      
+      printModelSelection(mockModels, 'gemma4:latest');
+      
+      const fullLogStr = logs.join('\n');
+      assert.ok(fullLogStr.includes('gemma4:latest'));
+      assert.ok(fullLogStr.includes('codegemma:latest'));
+      assert.ok(fullLogStr.includes('llama'));
+      assert.ok(fullLogStr.includes('9B'));
+      assert.ok(fullLogStr.includes('Q4_K_M'));
+      assert.ok(fullLogStr.includes('4.5 GB'));
+      assert.ok(fullLogStr.includes('Tools: Native'));
+    } finally {
+      console.log = originalLog;
+    }
   });
 });

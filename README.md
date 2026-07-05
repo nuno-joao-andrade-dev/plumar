@@ -243,6 +243,23 @@ While in the interactive prompt, you can use special commands to manage your ses
 | **`/context [dir]`**| Scan and index workspace directories recursively, appending the map to the active session. |
 | **`/exit` or `/quit`**| Safely terminate the chat session. |
 
+### 🎭 Customizing Chat Modes
+
+You can customize the prompt profiles or define your own chat modes locally:
+1. Open the settings file at `./.plumar/settings.json` (created automatically on first run).
+2. Edit or add keys inside the `"chatModes"` mapping.
+3. Each chat mode should have the following structure:
+   ```json
+   "my-mode": {
+     "name": "My Custom Mode",
+     "emoji": "🌟",
+     "description": "Your custom mode description",
+     "temperature": 0.7,
+     "systemPrompt": "You are a custom assistant..."
+   }
+   ```
+4. Restart the application or run `/mode` to switch to your custom mode!
+
 ---
 
 ## 🔌 Configuring External MCP Servers

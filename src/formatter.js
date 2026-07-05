@@ -257,7 +257,7 @@ export function printThinkingProcess(steps) {
 
   thinkingText = thinkingText.trim();
   if (thinkingText) {
-    console.log(pc.cyan(pc.bold('💭 Thinking Process:')));
+    console.log(pc.cyan(pc.bold('Thinking Process:')));
     thinkingText.split('\n').forEach(line => {
       console.log(pc.dim(pc.italic(`  ${line}`)));
     });
@@ -267,7 +267,7 @@ export function printThinkingProcess(steps) {
 
 export function printBanner() {
   console.log(pc.magenta(pc.bold('┌────────────────────────────────────────────────────────┐')));
-  console.log(pc.magenta(pc.bold('│')) + pc.bold(pc.cyan('   🤖 PLUMAR CLI                                        ')) + pc.magenta(pc.bold('│')));
+  console.log(pc.magenta(pc.bold('│')) + pc.bold(pc.cyan('   PLUMAR CLI                                           ')) + pc.magenta(pc.bold('│')));
   console.log(pc.magenta(pc.bold('│')) + pc.dim('   Your local AI engine for chat, coding & scripting    ') + pc.magenta(pc.bold('│')));
   console.log(pc.magenta(pc.bold('├────────────────────────────────────────────────────────┤')));
   console.log(pc.magenta(pc.bold('│')) + pc.dim('   Core Slash Commands:                                 ') + pc.magenta(pc.bold('│')));
@@ -281,6 +281,7 @@ export function printBanner() {
   console.log(pc.magenta(pc.bold('│')) + '   ' + pc.yellow('/plugins') + '    List custom JS code plugins              ' + pc.magenta(pc.bold('│')));
   console.log(pc.magenta(pc.bold('│')) + '   ' + pc.yellow('/sessions') + '   Manage, load & delete stored sessions    ' + pc.magenta(pc.bold('│')));
   console.log(pc.magenta(pc.bold('│')) + '   ' + pc.yellow('/policy') + '     View or configure tool execution policies' + pc.magenta(pc.bold('│')));
+  console.log(pc.magenta(pc.bold('│')) + '   ' + pc.yellow('/parameter') + '  View/configure active model parameters    ' + pc.magenta(pc.bold('│')));
   console.log(pc.magenta(pc.bold('│')) + '   ' + pc.yellow('/clear') + '      Clear screen & start clean session       ' + pc.magenta(pc.bold('│')));
   console.log(pc.magenta(pc.bold('│')) + '   ' + pc.yellow('/minimize') + '   Prune older history/reduce context size  ' + pc.magenta(pc.bold('│')));
   console.log(pc.magenta(pc.bold('│')) + '   ' + pc.yellow('/context') + '    Load & minimize folder files into context' + pc.magenta(pc.bold('│')));
@@ -293,7 +294,7 @@ export function printHelp(topic) {
   const normalized = topic ? topic.trim().toLowerCase() : '';
 
   if (normalized === 'piping' || normalized === 'pipe') {
-    console.log(pc.bold(pc.yellow('\n🔗 Prompt Piping Help:')));
+    console.log(pc.bold(pc.yellow('\nPrompt Piping Help:')));
     console.log(`  You can execute a local shell command and automatically feed its output into your prompt.`);
     console.log(`  Syntax: ${pc.cyan('<your prompt text> | <shell command>')}`);
     console.log(`\n  ${pc.bold('Examples:')}`);
@@ -303,12 +304,12 @@ export function printHelp(topic) {
     console.log(`      Runs \`git diff\` and appends the diff output to your prompt.`);
     console.log(`    • ${pc.cyan('why is my test failing | node --test tests/tools.test.js')}`);
     console.log(`      Runs tests and sends the output results directly to the agent.`);
-    console.log(`\n  ${pc.dim('💡 Note: Questions about the pipe character itself (e.g. ending in "?") are automatically ignored and not executed.')}\n`);
+    console.log(`\n  ${pc.dim('Note: Questions about the pipe character itself (e.g. ending in "?") are automatically ignored and not executed.')}\n`);
     return;
   }
 
   if (normalized === 'history' || normalized === 'search' || normalized === 'ctrl+r' || normalized === 'ctrl-r') {
-    console.log(pc.bold(pc.yellow('\n📜 Command & Search History Help:')));
+    console.log(pc.bold(pc.yellow('\nCommand & Search History Help:')));
     console.log(`  ${pc.bold('1. History List')}`);
     console.log(`     Type ${pc.yellow('/history')} to display all unique prompts and commands entered in chronological order.`);
     console.log(`\n  ${pc.bold('2. Interactive Reverse i-Search')}`);
@@ -331,6 +332,7 @@ export function printHelp(topic) {
   console.log(`  ${pc.yellow('/mode <name>')}  - Switch directly to a mode (e.g. /mode code).`);
   console.log(`  ${pc.yellow('/model')}        - Interactively switch active Ollama model.`);
   console.log(`  ${pc.yellow('/host')}         - Display or dynamically switch Ollama server host.`);
+  console.log(`  ${pc.yellow('/parameter')}    - View, list, or set active model parameters on-the-fly.`);
   console.log(`  ${pc.yellow('/tools')}        - List all file system & system utilities currently loaded.`);
   console.log(`  ${pc.yellow('/samples')}      - Show sample commands/prompts for every tool.`);
   console.log(`  ${pc.yellow('/skills')}       - List all loaded custom skills.`);
@@ -674,10 +676,10 @@ export function printToolResult(toolName, result) {
   console.log(pc.blue(`📦 [Agent Tool Result] `) + pc.bold(pc.blue(toolName)) + ` completed with ` + statusStr);
   if (result.success === false) {
     if (typeof result === 'object' && result !== null) {
-      console.log(pc.red(`   ⚠️  Error: ${result.error || 'Failed'}`));
+      console.log(pc.red(`   Error: ${result.error || 'Failed'}`));
       console.log(formatJsonAsTable(result));
     } else {
-      console.log(pc.red(`   ⚠️  Error: ${result}`));
+      console.log(pc.red(`   Error: ${result}`));
     }
   } else {
     if (typeof result === 'object' && result !== null) {
@@ -691,15 +693,16 @@ export function printToolResult(toolName, result) {
 export function printStatus(model, mode, modeMeta, temperature = null) {
   const tempStr = temperature !== null ? ` (temp: ${temperature})` : '';
   const modelDisplay = (model + tempStr).padEnd(38);
+  const modeDisplay = (modeMeta.emoji ? (modeMeta.emoji + ' ' + modeMeta.name) : modeMeta.name).padEnd(38);
   console.log(pc.bold(pc.cyan('┌────────────────────────────────────────────────────────┐')));
   console.log(pc.bold(pc.cyan('│')) + `  ${pc.bold('Active Model:')}  ${pc.magenta(modelDisplay)} ${pc.bold(pc.cyan('│'))}`);
-  console.log(pc.bold(pc.cyan('│')) + `  ${pc.bold('Active Mode:')}   ${(modeMeta.emoji + ' ' + modeMeta.name).padEnd(38)} ${pc.bold(pc.cyan('│'))}`);
+  console.log(pc.bold(pc.cyan('│')) + `  ${pc.bold('Active Mode:')}   ${modeDisplay} ${pc.bold(pc.cyan('│'))}`);
   console.log(pc.bold(pc.cyan('└────────────────────────────────────────────────────────┘')));
   console.log();
 }
 
 export function printModes(chatModes, activeMode) {
-  console.log(pc.bold(pc.yellow('\n🎭 Available Chat Modes:')));
+  console.log(pc.bold(pc.yellow('\nAvailable Chat Modes:')));
   Object.entries(chatModes).forEach(([key, meta]) => {
     const isSelected = key === activeMode;
     const bullet = isSelected ? pc.bold(pc.green('❯')) : ' ';
@@ -707,23 +710,88 @@ export function printModes(chatModes, activeMode) {
     const details = `${meta.emoji} ${pc.bold(meta.name)} - ${meta.description}`;
     console.log(`  ${bullet} [${keyName}] ${details}`);
   });
-  console.log();
+  console.log(pc.dim('  Note: You can customize or add custom chat modes in ./.plumar/settings.json\n'));
+}
+
+function hasNativeToolSupport(model) {
+  if (!model) return false;
+  const name = (model.name || '').toLowerCase();
+  const family = (model.details?.family || '').toLowerCase();
+  const families = Array.isArray(model.details?.families)
+    ? model.details.families.map(f => String(f).toLowerCase())
+    : [];
+
+  const knownFamilies = [
+    'llama', 'mistral', 'mixtral', 'qwen', 'qwen2', 'command-r', 
+    'cohere', 'nemotron', 'granite', 'firefunction', 'phi4'
+  ];
+
+  if (knownFamilies.includes(family)) {
+    return true;
+  }
+  for (const f of families) {
+    if (knownFamilies.includes(f)) {
+      return true;
+    }
+  }
+
+  const knownNameKeywords = [
+    'llama3', 'llama-3', 'mistral', 'mixtral', 'qwen2', 'qwen-2', 
+    'command-r', 'nemotron', 'granite', 'firefunction', 'phi-4'
+  ];
+  for (const kw of knownNameKeywords) {
+    if (name.includes(kw)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function printModelSelection(models, currentModel) {
-  console.log(pc.bold(pc.yellow('\n🤖 Available Ollama Models:')));
+  console.log(pc.bold(pc.yellow('\nAvailable Ollama Models:')));
   models.forEach((model, index) => {
-    const isSelected = model === currentModel;
+    const isObj = typeof model === 'object' && model !== null;
+    const modelName = isObj ? model.name : model;
+    const isSelected = modelName === currentModel;
     const bullet = isSelected ? pc.bold(pc.green('❯')) : ' ';
     const num = pc.cyan(`[${index + 1}]`);
-    const name = isSelected ? pc.bold(pc.green(model)) : model;
-    console.log(`  ${bullet} ${num} ${name}`);
+    const name = isSelected ? pc.bold(pc.green(modelName)) : modelName;
+
+    let extraInfo = '';
+    if (isObj) {
+      const charParts = [];
+      if (model.details?.family) {
+        charParts.push(model.details.family);
+      }
+      if (model.details?.parameter_size) {
+        charParts.push(model.details.parameter_size);
+      }
+      if (model.details?.quantization_level) {
+        charParts.push(model.details.quantization_level);
+      }
+      if (model.size) {
+        const gb = model.size / (1024 * 1024 * 1024);
+        const mb = model.size / (1024 * 1024);
+        const sizeStr = gb >= 1 ? `${gb.toFixed(1)} GB` : `${mb.toFixed(0)} MB`;
+        charParts.push(sizeStr);
+      }
+      
+      const nativeTools = hasNativeToolSupport(model);
+      charParts.push(nativeTools ? 'Tools: Native' : 'Tools: Text Fallback');
+
+      if (charParts.length > 0) {
+        extraInfo = pc.dim(` (${charParts.join(', ')})`);
+      }
+    }
+
+    console.log(`  ${bullet} ${num} ${name}${extraInfo}`);
   });
   console.log();
 }
 
 export function printSkills(skillsMap) {
-  console.log(pc.bold(pc.yellow('\n🎓 Loaded Custom Skills:')));
+  console.log(pc.bold(pc.yellow('\nLoaded Custom Skills:')));
   const entries = Object.entries(skillsMap);
   if (entries.length === 0) {
     console.log(pc.dim('  No custom skills currently loaded. Create one with /add-skill.'));
@@ -739,7 +807,7 @@ export function printSkills(skillsMap) {
 }
 
 export function printPlugins(pluginsMap) {
-  console.log(pc.bold(pc.yellow('\n🔌 Loaded Code Plugins:')));
+  console.log(pc.bold(pc.yellow('\nLoaded Code Plugins:')));
   const entries = Object.entries(pluginsMap);
   if (entries.length === 0) {
     console.log(pc.dim('  No code plugins currently loaded. Create one with /add-plugin.'));
@@ -863,7 +931,7 @@ const TOOL_SAMPLES = {
 };
 
 export function printSamples(toolsList) {
-  console.log(pc.bold(pc.yellow('\n📖 Tool Sample Commands & Prompts:')));
+  console.log(pc.bold(pc.yellow('\nTool Sample Commands & Prompts:')));
   const entries = Object.keys(toolsList);
   if (entries.length === 0) {
     console.log(pc.dim('  No tools currently loaded.'));
@@ -882,14 +950,14 @@ export function printSamples(toolsList) {
 }
 
 export function printFeatures() {
-  console.log(pc.bold(pc.magenta('\n🛸 Plumar Premium Features & Capabilities:')));
+  console.log(pc.bold(pc.magenta('\nPlumar Premium Features & Capabilities:')));
   
-  console.log(`\n  🎮 ${pc.bold(pc.cyan('Interactive Plumar Dino Game'))}`);
+  console.log(`\n  ${pc.bold(pc.cyan('Interactive Plumar Dino Game'))}`);
   console.log(`     • ${pc.dim('Launch a full retro-neon 8-bit themed Dino game right in your browser via')} ${pc.yellow('/dino-game')}${pc.dim('.')}`);
   console.log(`     • ${pc.dim('Includes standard and low-G physics, real-time ceiling running (gravity flip via')} ${pc.yellow('Shift')}/${pc.yellow('F')}${pc.dim('),')}`);
   console.log(`       ${pc.dim('persisted local-storage high score keeping, and nostalgia-inducing synthesized 8-bit audio FX.')}`);
 
-  console.log(`\n  🛠️  ${pc.bold(pc.cyan('Advanced Developer Utilities'))}`);
+  console.log(`\n  ${pc.bold(pc.cyan('Advanced Developer Utilities'))}`);
   console.log(`     • ${pc.magenta('Zero-Dependency Database Explorer')} - ${pc.dim('Direct schema exploration, table inspection, and SQL querying')}`);
   console.log(`       ${pc.dim('capabilities for PostgreSQL & MySQL databases using custom, robust CLI pipelines.')}`);
   console.log(`     • ${pc.magenta('Port Manager')} - ${pc.dim('Instantly identify and terminate process blocks on any active network port (PID/Port).')}`);
@@ -900,16 +968,16 @@ export function printFeatures() {
   console.log(`     • ${pc.magenta('Code Formatter & ES Linter')} - ${pc.dim('Keep your workspace neat with automated code formatter & linter integrations.')}`);
   console.log(`     • ${pc.magenta('Dependency Scanner')} - ${pc.dim('Detect unused/undeclared imports, outdated library versions, or audit vulnerabilities.')}`);
 
-  console.log(`\n  🛡️  ${pc.bold(pc.cyan('Custom Sandbox & Fine-Grained Safety Policies'))}`);
+  console.log(`\n  ${pc.bold(pc.cyan('Custom Sandbox & Fine-Grained Safety Policies'))}`);
   console.log(`     • ${pc.dim('Configure specific permission rules (')}ALLOW, ASK, or DENY${pc.dim(') for each tool using')} ${pc.yellow('/policy')}${pc.dim('.')}`);
   console.log(`     • ${pc.dim('Persistent configuration can be loaded or saved across sessions using')} ${pc.yellow('/policy config <file>')}${pc.dim('.')}`);
 
-  console.log(`\n  💾 ${pc.bold(pc.cyan('Interactive Session Persistence & REPL Navigation'))}`);
+  console.log(`\n  ${pc.bold(pc.cyan('Interactive Session Persistence & REPL Navigation'))}`);
   console.log(`     • ${pc.dim('Complete session management dashboard via')} ${pc.yellow('/sessions')} ${pc.dim('allowing you to load, store, or clear conversations.')}`);
   console.log(`     • ${pc.dim('Run interactive reverse history searching via')} ${pc.yellow('Ctrl+R')} ${pc.dim('or view past entries sequentially with')} ${pc.yellow('/history')}${pc.dim('.')}`);
   console.log(`     • ${pc.dim('Support for command piping (')}prompt | <shell command>${pc.dim(') to seamlessly inject dynamic output from standard tools.')}`);
 
-  console.log(`\n  🔌 ${pc.bold(pc.cyan('Model Context Protocol (MCP) Integration'))}`);
+  console.log(`\n  ${pc.bold(pc.cyan('Model Context Protocol (MCP) Integration'))}`);
   console.log(`     • ${pc.dim('Standard-compliant MCP host server client manager to dynamically plug in extra external tools and APIs')}`);
   console.log(`       ${pc.dim('defined in')} ${pc.blue('mcp-servers.json')}${pc.dim('.')}`);
   console.log();

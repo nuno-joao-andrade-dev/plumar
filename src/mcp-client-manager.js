@@ -66,12 +66,12 @@ class McpClient {
         protocolVersion: '2024-11-05',
         capabilities: {},
         clientInfo: { name: 'plumar-cli', version: '1.0.0' }
-      });
+      }, 5000);
 
       this.sendNotification('notifications/initialized');
 
       // Step 2: Query tools list
-      const toolsResult = await this.sendRequest('tools/list', {});
+      const toolsResult = await this.sendRequest('tools/list', {}, 5000);
       this.tools = toolsResult.tools || [];
     } catch (err) {
       this.stop();
@@ -79,34 +79,66 @@ class McpClient {
     }
   }
 
-  sendRequest(method, params) {
+  sendRequest(method, params, timeoutMs = 5000) {
     return new Promise((resolve, reject) => {
       if (!this.process || this.process.killed) {
         return reject(new Error(`MCP Server ${this.name} is not running.`));
       }
       const id = this.requestId++;
-      this.pendingRequests.set(id, { resolve, reject });
       
-      const payload = { jsonrpc: '2.0', id, method, params };
-      this.process.stdin.write(JSON.stringify(payload) + '\n');
+      const timer = setTimeout(() => {
+        if (this.pendingRequests.has(id)) {
+          this.pendingRequests.delete(id);
+          reject(new Error(`MCP request "${method}" to server "${this.name}" timed out after ${timeoutMs}ms`));
+        }
+      }, timeoutMs);
+
+      this.pendingRequests.set(id, {
+        resolve: (result) => {
+          clearTimeout(timer);
+          resolve(result);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        }
+      });
+      
+      try {
+        const payload = { jsonrpc: '2.0', id, method, params };
+        this.process.stdin.write(JSON.stringify(payload) + '\n');
+      } catch (err) {
+        clearTimeout(timer);
+        this.pendingRequests.delete(id);
+        reject(new Error(`Failed to write to MCP Server "${this.name}" stdin: ${err.message}`));
+      }
     });
   }
 
   sendNotification(method, params) {
     if (!this.process || this.process.killed) return;
-    const payload = { jsonrpc: '2.0', method, params };
-    this.process.stdin.write(JSON.stringify(payload) + '\n');
+    try {
+      const payload = { jsonrpc: '2.0', method, params };
+      this.process.stdin.write(JSON.stringify(payload) + '\n');
+    } catch (err) {
+      process.stderr.write(`⚠️  [MCP Client ${this.name}] Failed to send notification "${method}": ${err.message}\n`);
+    }
   }
 
   async callTool(toolName, args) {
     return await this.sendRequest('tools/call', {
       name: toolName,
       arguments: args
-    });
+    }, 30000);
   }
 
   stop() {
     if (this.process) {
+      // Clear all pending request timers to avoid keeping Node.js event loop alive
+      for (const [id, req] of this.pendingRequests.entries()) {
+        req.reject(new Error(`MCP Server ${this.name} stopped.`));
+      }
+      this.pendingRequests.clear();
       this.process.kill();
       this.process = null;
     }

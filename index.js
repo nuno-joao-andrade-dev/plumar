@@ -75,7 +75,7 @@ export async function executePipeCommand(command, abortSignal) {
   }
 }
 
-import { runAgentTurn, tools, fetchOllamaModels, CHAT_MODES, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, getSessionTokens } from './src/agent.js';
+import { runAgentTurn, tools, fetchOllamaModels, CHAT_MODES, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, getSessionTokens, castParameter } from './src/agent.js';
 import { loadAndStartMcpServers, getMcpTools } from './src/mcp-client-manager.js';
 import { 
   printBanner, 
@@ -317,7 +317,7 @@ async function main() {
     } else {
       const startupInfoData = [
         { label: 'Active Model', value: selectedModel },
-        { label: 'Active Chat Mode', value: '💬 Balanced Assistant' },
+        { label: 'Active Chat Mode', value: 'Balanced Assistant' },
         { label: 'ADK Session ID', value: 'session-bootstrap' },
         { label: 'History Events', value: '0 events' },
         { label: 'Workspace Root', value: process.cwd() },
@@ -412,7 +412,13 @@ async function main() {
   let activeModel = '';
   let activeMode = 'balanced';
   let activeTemperature = null;
+  let activeParameters = {};
   let alwaysShowOutput = null;
+
+  const ALLOWED_PARAMETERS = [
+    'temperature', 'top_p', 'top_k', 'min_p', 'seed',
+    'num_ctx', 'num_predict', 'stop', 'repeat_penalty', 'repeat_last_n'
+  ];
 
   // Graceful exit handler
   const shutdown = () => {
@@ -446,7 +452,7 @@ async function main() {
   rl.cursor = 0;
   while (!selectedModel) {
     try {
-      const models = await fetchOllamaModels();
+      const models = await fetchOllamaModels(true);
       
       if (models.length === 0) {
         console.log(pc.yellow('⚠️  Ollama is running, but no models were found.'));
@@ -460,7 +466,7 @@ async function main() {
         }
       } else if (models.length === 1) {
         // Automatically select the only available model
-        selectedModel = models[0];
+        selectedModel = models[0].name;
         console.log(pc.green(`✔ Only one model found. Automatically selected: ${pc.bold(selectedModel)}\n`));
         // Pause briefly so user can see it
         await new Promise(r => setTimeout(r, 1000));
@@ -475,14 +481,14 @@ async function main() {
         const index = parseInt(answer.trim(), 10) - 1;
         
         if (index >= 0 && index < models.length) {
-          selectedModel = models[index];
+          selectedModel = models[index].name;
           console.log(pc.green(`✔ Selected active model: ${pc.bold(selectedModel)}\n`));
           await new Promise(r => setTimeout(r, 600));
         } else {
           // Check if they typed the literal model name instead
-          const matched = models.find(m => m.toLowerCase() === answer.trim().toLowerCase());
+          const matched = models.find(m => m.name.toLowerCase() === answer.trim().toLowerCase());
           if (matched) {
-            selectedModel = matched;
+            selectedModel = matched.name;
             console.log(pc.green(`✔ Selected active model: ${pc.bold(selectedModel)}\n`));
             await new Promise(r => setTimeout(r, 600));
           } else {
@@ -982,7 +988,7 @@ export const tool = new FunctionTool({
             const infoData = [
               { label: 'Active Model', value: activeModel },
               { label: 'Temperature', value: activeTemperature !== null ? String(activeTemperature) : 'Default (Mode-defined)' },
-              { label: 'Active Chat Mode', value: CHAT_MODES[activeMode] ? (CHAT_MODES[activeMode].emoji + ' ' + CHAT_MODES[activeMode].name) : activeMode },
+              { label: 'Active Chat Mode', value: CHAT_MODES[activeMode] ? (CHAT_MODES[activeMode].emoji ? (CHAT_MODES[activeMode].emoji + ' ' + CHAT_MODES[activeMode].name) : CHAT_MODES[activeMode].name) : activeMode },
               { label: 'ADK Session ID', value: sessionId },
               { label: 'History Events', value: `${eventCount} events` },
               { label: 'Workspace Root', value: process.cwd() },
@@ -1197,6 +1203,7 @@ export const tool = new FunctionTool({
         }
         
         else if (command === '/mode') {
+          // Note: Users can add or customize chat modes in ./.plumar/settings.json
           if (!arg) {
             // No argument provided, show modes menu and prompt selection
             printModes(CHAT_MODES, activeMode);
@@ -1228,9 +1235,119 @@ export const tool = new FunctionTool({
           continue;
         } 
         
+        else if (command === '/parameter' || command === '/parameters') {
+          const subparts = trimmedInput.split(' ').filter(Boolean);
+          const action = subparts[1] ? subparts[1].toLowerCase() : 'list';
+          const paramName = subparts[2] ? subparts[2].toLowerCase() : null;
+          const paramValue = subparts.slice(3).join(' ').trim();
+
+          if (action === 'list') {
+            console.log(`\n⚙️  ${pc.bold('Active Session Ollama Parameters')} for Model ${pc.bold(activeModel)}:`);
+            console.log(pc.bold(pc.cyan('┌─────────────────┬──────────────────────┬──────────────────────┬──────────────────────┐')));
+            console.log(pc.bold(pc.cyan('│ Parameter Name  │ Current Mode Value   │ Session Override     │ Resolved Value       │')));
+            console.log(pc.bold(pc.cyan('├─────────────────┼──────────────────────┼──────────────────────┼──────────────────────┤')));
+            
+            const currentModeMeta = CHAT_MODES[activeMode] || {};
+            ALLOWED_PARAMETERS.forEach(p => {
+              const rawModeVal = currentModeMeta[p] !== undefined ? JSON.stringify(currentModeMeta[p]) : 'not set';
+              const rawOverrideVal = activeParameters[p] !== undefined ? JSON.stringify(activeParameters[p]) : 'not set';
+              
+              let rawResolved = 'Ollama default';
+              if (activeParameters[p] !== undefined) {
+                rawResolved = JSON.stringify(activeParameters[p]);
+              } else if (currentModeMeta[p] !== undefined) {
+                rawResolved = JSON.stringify(currentModeMeta[p]);
+              }
+              
+              // Style the values
+              const modeValStyle = currentModeMeta[p] !== undefined ? pc.yellow(rawModeVal) : pc.dim(rawModeVal);
+              const overrideValStyle = activeParameters[p] !== undefined ? pc.green(pc.bold(rawOverrideVal)) : pc.dim(rawOverrideVal);
+              
+              let resolvedStyle = pc.dim(rawResolved);
+              if (activeParameters[p] !== undefined) {
+                resolvedStyle = pc.green(pc.bold(rawResolved));
+              } else if (currentModeMeta[p] !== undefined) {
+                resolvedStyle = pc.yellow(rawResolved);
+              }
+
+              // Pad the styled columns by adjusting for their ANSI-stripped length
+              const col1 = p.padEnd(15);
+              const col2 = modeValStyle + ' '.repeat(Math.max(0, 20 - rawModeVal.length));
+              const col3 = overrideValStyle + ' '.repeat(Math.max(0, 20 - rawOverrideVal.length));
+              const col4 = resolvedStyle + ' '.repeat(Math.max(0, 20 - rawResolved.length));
+
+              console.log(pc.bold(pc.cyan('│ ')) + col1 + pc.bold(pc.cyan(' │ ')) + col2 + pc.bold(pc.cyan(' │ ')) + col3 + pc.bold(pc.cyan(' │ ')) + col4 + pc.bold(pc.cyan('│')));
+            });
+            console.log(pc.bold(pc.cyan('└─────────────────┴──────────────────────┴──────────────────────┴──────────────────────┘')));
+            console.log(`💡 Usage: ${pc.yellow('/parameter set <name> <value>')} or ${pc.yellow('/parameter get <name>')}\n`);
+          } else if (action === 'get') {
+            if (!paramName) {
+              console.log(pc.red(`❌ Missing parameter name. Usage: ${pc.yellow('/parameter get [parameter name]')}\n`));
+              continue;
+            }
+            if (!ALLOWED_PARAMETERS.includes(paramName)) {
+              console.log(pc.red(`❌ Unknown parameter: "${paramName}". Allowed parameters are:\n   ${ALLOWED_PARAMETERS.join(', ')}\n`));
+              continue;
+            }
+            
+            const currentModeMeta = CHAT_MODES[activeMode] || {};
+            const overrideVal = activeParameters[paramName];
+            const modeVal = currentModeMeta[paramName];
+            
+            console.log(`\n🔍 ${pc.bold('Parameter ' + pc.yellow(paramName))}:`);
+            if (overrideVal !== undefined) {
+              console.log(`  • Session Override: ${pc.green(pc.bold(JSON.stringify(overrideVal)))}`);
+            } else {
+              console.log(`  • Session Override: ${pc.dim('not set')}`);
+            }
+            if (modeVal !== undefined) {
+              console.log(`  • Current Mode Default: ${pc.yellow(JSON.stringify(modeVal))}`);
+            } else {
+              console.log(`  • Current Mode Default: ${pc.dim('not set')}`);
+            }
+            
+            const resolved = overrideVal !== undefined ? overrideVal : (modeVal !== undefined ? modeVal : 'Ollama default');
+            console.log(`  • Resolved Value: ${pc.cyan(pc.bold(JSON.stringify(resolved)))}\n`);
+          } else if (action === 'set') {
+            if (!paramName) {
+              console.log(pc.red(`❌ Missing parameter name. Usage: ${pc.yellow('/parameter set [parameter name] [value]')}\n`));
+              continue;
+            }
+            if (!ALLOWED_PARAMETERS.includes(paramName)) {
+              console.log(pc.red(`❌ Unknown parameter: "${paramName}". Allowed parameters are:\n   ${ALLOWED_PARAMETERS.join(', ')}\n`));
+              continue;
+            }
+            if (!paramValue) {
+              // Reset the parameter to mode default (delete from override)
+              delete activeParameters[paramName];
+              if (paramName === 'temperature') {
+                activeTemperature = null;
+              }
+              console.log(pc.green(`✔ Parameter "${pc.bold(paramName)}" has been reset to mode defaults.\n`));
+              continue;
+            }
+            
+            // Cast and validate
+            const casted = castParameter(paramName, paramValue);
+            if (casted === null) {
+              console.log(pc.red(`❌ Invalid value "${paramValue}" for parameter "${paramName}".\n`));
+              continue;
+            }
+            
+            activeParameters[paramName] = casted;
+            if (paramName === 'temperature') {
+              activeTemperature = casted;
+            }
+            console.log(pc.green(`✔ Parameter "${pc.bold(paramName)}" successfully set to: ${pc.bold(JSON.stringify(casted))}\n`));
+          } else {
+            console.log(pc.red(`❌ Unknown action "${action}". Usage: ${pc.yellow('/parameter [list|set|get] [parameter name] [value]')}\n`));
+          }
+          continue;
+        } 
+        
         else if (command === '/model') {
           try {
-            const models = await fetchOllamaModels();
+            const models = await fetchOllamaModels(true);
             if (models.length === 0) {
               console.log(pc.yellow('⚠️  No models are currently installed in Ollama. Pull some first!\n'));
             } else {
@@ -1239,7 +1356,7 @@ export const tool = new FunctionTool({
               const index = parseInt(answer.trim(), 10) - 1;
               
               if (index >= 0 && index < models.length) {
-                activeModel = models[index];
+                activeModel = models[index].name;
 
                 // Prompt for temperature
                 let tempAnswer = await rl.question(pc.cyan('Enter temperature (0.0 - 1.0, or press [Enter] for default) › '));
@@ -1261,9 +1378,9 @@ export const tool = new FunctionTool({
                 printStatus(activeModel, activeMode, CHAT_MODES[activeMode], activeTemperature);
                 console.log(pc.green(`✔ Model successfully changed to: ${pc.bold(activeModel)}\n`));
               } else {
-                const matched = models.find(m => m.toLowerCase() === answer.trim().toLowerCase());
+                const matched = models.find(m => m.name.toLowerCase() === answer.trim().toLowerCase());
                 if (matched) {
-                  activeModel = matched;
+                  activeModel = matched.name;
 
                   // Prompt for temperature
                   let tempAnswer = await rl.question(pc.cyan('Enter temperature (0.0 - 1.0, or press [Enter] for default) › '));
@@ -1386,7 +1503,7 @@ export const tool = new FunctionTool({
 
         console.log(pc.dim(`\n🤖 Agent [${CHAT_MODES[activeMode].name}] is thinking & executing tools using ${activeModel}... (Press ESC to cancel)`));
 
-        const { text, steps } = await runAgentTurn(sessionId, finalPrompt, activeModel, activeMode, controller.signal, activeTemperature);
+        const { text, steps } = await runAgentTurn(sessionId, finalPrompt, activeModel, activeMode, controller.signal, activeTemperature, activeParameters);
 
         if (controller.signal.aborted) {
           throw new Error('Request cancelled by user (ESC)');
