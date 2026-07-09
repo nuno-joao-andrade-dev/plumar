@@ -75,7 +75,7 @@ export async function executePipeCommand(command, abortSignal) {
   }
 }
 
-import { runAgentTurn, tools, fetchOllamaModels, CHAT_MODES, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, getSessionTokens, castParameter } from './src/agent.js';
+import { runAgentTurn, tools, fetchOllamaModels, CHAT_MODES, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, getSessionTokens, castParameter, getLlmProvider, setLlmProvider, getOllamaHost, setOllamaHost, getLmStudioHost, setLmStudioHost, getLmStudioAuth, setLmStudioAuth } from './src/agent.js';
 import { loadAndStartMcpServers, getMcpTools } from './src/mcp-client-manager.js';
 import { 
   printBanner, 
@@ -202,9 +202,12 @@ export function printSettingsTable(title, settings) {
  */
 export function displaySettingsTable() {
   const activeFile = getActivePolicyConfigFile();
+  const provider = getLlmProvider();
+  const providerName = provider === 'lmstudio' ? 'LM Studio' : 'Ollama';
   const settingsData = [
-    { label: 'Ollama Endpoint', value: getOllamaBaseUrl() },
-    { label: 'Ollama Auth', value: getOllamaAuth() ? '****** (Configured)' : 'None' },
+    { label: 'LLM Provider', value: providerName },
+    { label: `${providerName} Endpoint`, value: getOllamaBaseUrl() },
+    { label: `${providerName} Auth`, value: getOllamaAuth() ? '****** (Configured)' : 'None' },
     { label: 'Verbose JSON Logs', value: isVerboseJsonEnabled() ? 'ON' : 'OFF' },
     { label: 'ADK Info Logs', value: isAdkInfoEnabled() ? 'ON' : 'OFF' },
     { label: 'Default Tool Policy', value: getDefaultPolicy().toUpperCase() },
@@ -308,20 +311,24 @@ async function main() {
         activeMode: 'balanced',
         sessionId: 'session-bootstrap',
         workspaceRoot: process.cwd(),
-        ollamaEndpoint: getOllamaBaseUrl(),
+        llmProvider: getLlmProvider(),
+        serverEndpoint: getOllamaBaseUrl(),
         verboseJsonLogs: isVerboseJsonEnabled(),
         adkInfoLogs: isAdkInfoEnabled(),
         session: null
       }, null, 2));
       console.log();
     } else {
+      const provider = getLlmProvider();
+      const providerName = provider === 'lmstudio' ? 'LM Studio' : 'Ollama';
       const startupInfoData = [
         { label: 'Active Model', value: selectedModel },
         { label: 'Active Chat Mode', value: 'Balanced Assistant' },
         { label: 'ADK Session ID', value: 'session-bootstrap' },
         { label: 'History Events', value: '0 events' },
         { label: 'Workspace Root', value: process.cwd() },
-        { label: 'Ollama Endpoint', value: getOllamaBaseUrl() },
+        { label: 'LLM Provider', value: providerName },
+        { label: `${providerName} Endpoint`, value: getOllamaBaseUrl() },
         { label: 'Verbose JSON Logs', value: isVerboseJsonEnabled() ? 'ON' : 'OFF' },
         { label: 'ADK Info Logs', value: isAdkInfoEnabled() ? 'ON' : 'OFF' }
       ];
@@ -447,105 +454,207 @@ async function main() {
   // Clear screen before launching setup
   console.clear();
   console.log(pc.magenta(pc.bold('🤖 Starting Plumar (plumar-cli)...')));
-  console.log(pc.dim(`Querying Ollama server at ${pc.bold(getOllamaBaseUrl())} for available models...\n`));
-
+  
   // 1. Interactive Model Selection on Startup
   let selectedModel = null;
   // Clear any garbage or buffered terminal color query responses (e.g. OSC 11) from background charsm/termenv init
   rl.line = '';
   rl.cursor = 0;
   while (!selectedModel) {
-    try {
-      const models = await fetchOllamaModels(true);
-      
-      if (models.length === 0) {
-        console.log(pc.yellow('⚠️  Ollama is running, but no models were found.'));
-        console.log(pc.dim('Please pull a model first using: "ollama pull gemma4" or another model.\n'));
+    console.log(pc.dim(`Querying Ollama at ${pc.bold(getOllamaHost())} and LM Studio at ${pc.bold(getLmStudioHost())} for models...\n`));
+
+    let ollamaModels = [];
+    let lmStudioModels = [];
+    let ollamaError = null;
+    let lmStudioError = null;
+
+    const ollamaPromise = (async () => {
+      const oldProvider = getLlmProvider();
+      try {
+        setLlmProvider('ollama');
+        ollamaModels = await fetchOllamaModels(true);
+      } catch (err) {
+        ollamaError = err.message;
+      } finally {
+        setLlmProvider(oldProvider);
+      }
+    })();
+
+    const lmStudioPromise = (async () => {
+      const oldProvider = getLlmProvider();
+      try {
+        setLlmProvider('lmstudio');
+        lmStudioModels = await fetchOllamaModels(true);
+      } catch (err) {
+        lmStudioError = err.message;
+      } finally {
+        setLlmProvider(oldProvider);
+      }
+    })();
+
+    await Promise.all([ollamaPromise, lmStudioPromise]);
+
+    console.log(pc.bold(pc.yellow('\n🤖 Available Models:')));
+    console.log(pc.bold(pc.cyan('─'.repeat(60))));
+
+    let listIndex = 1;
+    const modelLookup = []; // Maps listIndex to selection item
+
+    if (ollamaModels.length > 0) {
+      console.log(pc.bold(pc.magenta(' Ollama:')));
+      ollamaModels.forEach(m => {
+        const isSelected = m.name === activeModel && getLlmProvider() === 'ollama';
+        const bullet = isSelected ? pc.bold(pc.green('❯')) : ' ';
+        const num = pc.cyan(` [${listIndex}]`);
+        const name = isSelected ? pc.bold(pc.green(m.name)) : m.name;
         
-        const manualName = await rl.question(pc.cyan('Enter model name manually to continue › '));
-        if (manualName.trim()) {
-          selectedModel = manualName.trim();
-        } else {
-          continue;
+        let extraInfo = '';
+        const charParts = [];
+        if (m.details?.family) charParts.push(m.details.family);
+        if (m.details?.parameter_size) charParts.push(m.details.parameter_size);
+        if (m.size) {
+          const gb = m.size / (1024 * 1024 * 1024);
+          charParts.push(`${gb.toFixed(1)} GB`);
         }
-      } else if (models.length === 1) {
-        // Automatically select the only available model
-        selectedModel = models[0].name;
-        console.log(pc.green(`✔ Only one model found. Automatically selected: ${pc.bold(selectedModel)}\n`));
-        // Pause briefly so user can see it
-        await new Promise(r => setTimeout(r, 1000));
+        if (charParts.length > 0) {
+          extraInfo = pc.dim(` (${charParts.join(', ')})`);
+        }
+
+        console.log(`  ${bullet} ${num} ${name}${extraInfo}`);
+        modelLookup.push({ name: m.name, provider: 'ollama' });
+        listIndex++;
+      });
+    } else {
+      console.log(pc.bold(pc.magenta(' Ollama:')) + pc.dim(' (No models found or server offline)'));
+    }
+
+    console.log();
+
+    if (lmStudioModels.length > 0) {
+      console.log(pc.bold(pc.magenta(' LM Studio:')));
+      lmStudioModels.forEach(m => {
+        const isSelected = m.name === activeModel && getLlmProvider() === 'lmstudio';
+        const bullet = isSelected ? pc.bold(pc.green('❯')) : ' ';
+        const num = pc.cyan(` [${listIndex}]`);
+        const name = isSelected ? pc.bold(pc.green(m.name)) : m.name;
+        
+        console.log(`  ${bullet} ${num} ${name}`);
+        modelLookup.push({ name: m.name, provider: 'lmstudio' });
+        listIndex++;
+      });
+    } else {
+      console.log(pc.bold(pc.magenta(' LM Studio:')) + pc.dim(' (No models found or server offline)'));
+    }
+
+    console.log(pc.bold(pc.cyan('─'.repeat(60))));
+    console.log(pc.bold(pc.yellow(' Additional Options:')));
+    console.log(`  ${pc.cyan(' [C]')} ${pc.bold('Configure')} Endpoints & Authentication`);
+    console.log(`  ${pc.cyan(' [M]')} ${pc.bold('Manual')} model name override`);
+    console.log(`  ${pc.cyan(' [E]')} ${pc.bold('Exit')} Plumar\n`);
+
+    rl.line = '';
+    rl.cursor = 0;
+    const answer = await rl.question(pc.green(pc.bold('Choose model number or option letter (C/M/E) › ')));
+    const trimmed = answer.trim().toLowerCase();
+
+    if (trimmed === 'c') {
+      let back = false;
+      while (!back) {
+        console.clear();
+        console.log(pc.bold(pc.yellow('\n⚙️  Configure Endpoints & Authentication:')));
+        console.log(pc.bold(pc.cyan('─'.repeat(60))));
+        console.log(`  ${pc.cyan('[1]')} Configure Ollama Endpoint (current: ${pc.bold(getOllamaHost())})`);
+        console.log(`  ${pc.cyan('[2]')} Configure Ollama Authentication Header/Token (current: ${pc.bold(getOllamaAuth() ? '******' : 'None')})`);
+        console.log(`  ${pc.cyan('[3]')} Configure LM Studio Endpoint (current: ${pc.bold(getLmStudioHost())})`);
+        console.log(`  ${pc.cyan('[4]')} Configure LM Studio Authentication Header/Token (current: ${pc.bold(getLmStudioAuth() ? '******' : 'None')})`);
+        console.log(`  ${pc.cyan('[5]')} Save & Go Back`);
+        console.log(pc.bold(pc.cyan('─'.repeat(60))));
+
+        const configChoice = await rl.question(pc.green(pc.bold('Choose option (1-5) › ')));
+        const trimmedChoice = configChoice.trim();
+
+        if (trimmedChoice === '1') {
+          const newUrl = await rl.question(pc.cyan(`Enter Ollama Server URL (press [Enter] to keep current: ${getOllamaHost()}) › `));
+          if (newUrl.trim()) {
+            setOllamaHost(newUrl.trim());
+            console.log(pc.green(`✔ Ollama Host successfully updated to: ${pc.bold(getOllamaHost())}`));
+            await new Promise(r => setTimeout(r, 800));
+          }
+        } else if (trimmedChoice === '2') {
+          const newAuth = await rl.question(pc.cyan(`Enter Ollama Authentication Header/Token (type "none" to clear) › `));
+          const tAuth = newAuth.trim();
+          if (tAuth) {
+            if (tAuth.toLowerCase() === 'none' || tAuth.toLowerCase() === 'clear') {
+              setOllamaAuth('');
+            } else {
+              setOllamaAuth(tAuth);
+            }
+            console.log(pc.green(`✔ Ollama Authentication successfully updated.`));
+            await new Promise(r => setTimeout(r, 800));
+          }
+        } else if (trimmedChoice === '3') {
+          const newUrl = await rl.question(pc.cyan(`Enter LM Studio Server URL (press [Enter] to keep current: ${getLmStudioHost()}) › `));
+          if (newUrl.trim()) {
+            setLmStudioHost(newUrl.trim());
+            console.log(pc.green(`✔ LM Studio Host successfully updated to: ${pc.bold(getLmStudioHost())}`));
+            await new Promise(r => setTimeout(r, 800));
+          }
+        } else if (trimmedChoice === '4') {
+          const newAuth = await rl.question(pc.cyan(`Enter LM Studio Authentication Header/Token (type "none" to clear) › `));
+          const tAuth = newAuth.trim();
+          if (tAuth) {
+            if (tAuth.toLowerCase() === 'none' || tAuth.toLowerCase() === 'clear') {
+              setLmStudioAuth('');
+            } else {
+              setLmStudioAuth(tAuth);
+            }
+            console.log(pc.green(`✔ LM Studio Authentication successfully updated.`));
+            await new Promise(r => setTimeout(r, 800));
+          }
+        } else if (trimmedChoice === '5') {
+          back = true;
+        }
+      }
+      console.clear();
+      console.log(pc.cyan('🔄 Refreshing models list...\n'));
+    } else if (trimmed === 'm') {
+      const manualName = await rl.question(pc.cyan('Enter model name manually › '));
+      if (manualName.trim()) {
+        selectedModel = manualName.trim();
+        const providerAnswer = await rl.question(pc.cyan(`Select LLM Provider for manual model (1: Ollama, 2: LM Studio, current: ${getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama'}) › `));
+        if (providerAnswer.trim() === '1') {
+          setLlmProvider('ollama');
+        } else if (providerAnswer.trim() === '2') {
+          setLlmProvider('lmstudio');
+        }
+        console.log(pc.green(`✔ Configured with manual model name: ${pc.bold(selectedModel)}\n`));
+      }
+    } else if (trimmed === 'e') {
+      console.log(pc.magenta(pc.bold('\n👋 Goodbye! Thank you for using Plumar.')));
+      rl.close();
+      process.exit(0);
+    } else {
+      const choiceIndex = parseInt(trimmed, 10) - 1;
+      if (choiceIndex >= 0 && choiceIndex < modelLookup.length) {
+        const selected = modelLookup[choiceIndex];
+        setLlmProvider(selected.provider);
+        selectedModel = selected.name;
+        console.log(pc.green(`✔ Selected active provider: ${pc.bold(selected.provider === 'lmstudio' ? 'LM Studio' : 'Ollama')}`));
+        console.log(pc.green(`✔ Selected active model: ${pc.bold(selectedModel)}\n`));
+        await new Promise(r => setTimeout(r, 600));
       } else {
-        // Display list of models and prompt user to select
-        printModelSelection(models, activeModel);
-        
-        // Ensure the input line buffer is clean of background color query noise
-        rl.line = '';
-        rl.cursor = 0;
-        const answer = await rl.question(pc.green(pc.bold(`Choose model (1-${models.length}) › `)));
-        const index = parseInt(answer.trim(), 10) - 1;
-        
-        if (index >= 0 && index < models.length) {
-          selectedModel = models[index].name;
+        // Check if they typed a literal model name from the list
+        const matched = modelLookup.find(item => item.name.toLowerCase() === trimmed);
+        if (matched) {
+          setLlmProvider(matched.provider);
+          selectedModel = matched.name;
+          console.log(pc.green(`✔ Selected active provider: ${pc.bold(matched.provider === 'lmstudio' ? 'LM Studio' : 'Ollama')}`));
           console.log(pc.green(`✔ Selected active model: ${pc.bold(selectedModel)}\n`));
           await new Promise(r => setTimeout(r, 600));
         } else {
-          // Check if they typed the literal model name instead
-          const matched = models.find(m => m.name.toLowerCase() === answer.trim().toLowerCase());
-          if (matched) {
-            selectedModel = matched.name;
-            console.log(pc.green(`✔ Selected active model: ${pc.bold(selectedModel)}\n`));
-            await new Promise(r => setTimeout(r, 600));
-          } else {
-            console.log(pc.red('❌ Invalid selection. Please enter a valid number or model name.\n'));
-          }
+          console.log(pc.red('❌ Invalid selection. Please enter a valid number or option letter.\n'));
+          await new Promise(r => setTimeout(r, 1000));
         }
-      }
-    } catch (error) {
-      console.log(pc.red(`❌ Connection failed: ${error.message}`));
-      console.log(pc.yellow(`\n💡 Make sure Ollama is started and accessible at ${pc.bold(getOllamaBaseUrl())}`));
-      
-      console.log(pc.cyan('\nConnection Options:'));
-      console.log(` [1] ${pc.bold('Retry')} connection with current settings`);
-      console.log(` [2] ${pc.bold('Configure')} Ollama Server URL & Credentials`);
-      console.log(` [3] ${pc.bold('Manual')} model name override`);
-      console.log(` [4] ${pc.bold('Exit')} Plumar`);
-      
-      const choice = await rl.question(pc.green('\nChoose option (1-4, or press [Enter] to retry) › '));
-      const trimmedChoice = choice.trim();
-      
-      if (trimmedChoice === '2') {
-        const currentUrl = getOllamaBaseUrl();
-        const currentAuth = getOllamaAuth();
-        
-        const newUrl = await rl.question(pc.cyan(`Enter Ollama Server URL (press [Enter] to keep current: ${currentUrl}) › `));
-        if (newUrl.trim()) {
-          setOllamaBaseUrl(newUrl.trim());
-        }
-        
-        const newAuth = await rl.question(pc.cyan(`Enter Optional Credentials / Auth Header (type "none" to clear, current: ${currentAuth || 'none'}) › `));
-        if (newAuth.trim()) {
-          if (newAuth.trim().toLowerCase() === 'none' || newAuth.trim().toLowerCase() === 'clear') {
-            setOllamaAuth('');
-          } else {
-            setOllamaAuth(newAuth.trim());
-          }
-        }
-        
-        console.clear();
-        console.log(pc.cyan('🔄 Retrying Ollama connection with updated settings...\n'));
-      } else if (trimmedChoice === '3') {
-        const manualName = await rl.question(pc.cyan('Enter model name manually › '));
-        if (manualName.trim()) {
-          selectedModel = manualName.trim();
-          console.log(pc.green(`✔ Configured with manual model name: ${pc.bold(selectedModel)}\n`));
-        }
-      } else if (trimmedChoice === '4') {
-        console.log(pc.magenta(pc.bold('\n👋 Goodbye! Thank you for using Plumar.')));
-        rl.close();
-        process.exit(0);
-      } else {
-        console.clear();
-        console.log(pc.cyan('🔄 Retrying Ollama connection...\n'));
       }
     }
   }
@@ -1013,14 +1122,17 @@ export const tool = new FunctionTool({
               activeTemperature,
               sessionId,
               workspaceRoot: process.cwd(),
-              ollamaEndpoint: getOllamaBaseUrl(),
-              ollamaAuth: getOllamaAuth() ? '******' : 'None',
+              llmProvider: getLlmProvider(),
+              serverEndpoint: getOllamaBaseUrl(),
+              serverAuth: getOllamaAuth() ? '******' : 'None',
               verboseJsonLogs: isVerboseJsonEnabled(),
               adkInfoLogs: isAdkInfoEnabled(),
               session
             }, null, 2));
             console.log();
           } else {
+            const provider = getLlmProvider();
+            const providerName = provider === 'lmstudio' ? 'LM Studio' : 'Ollama';
             const infoData = [
               { label: 'Active Model', value: activeModel },
               { label: 'Temperature', value: activeTemperature !== null ? String(activeTemperature) : 'Default (Mode-defined)' },
@@ -1028,8 +1140,9 @@ export const tool = new FunctionTool({
               { label: 'ADK Session ID', value: sessionId },
               { label: 'History Events', value: `${eventCount} events` },
               { label: 'Workspace Root', value: process.cwd() },
-              { label: 'Ollama Endpoint', value: getOllamaBaseUrl() },
-              { label: 'Ollama Auth', value: getOllamaAuth() ? '****** (Configured)' : 'None' },
+              { label: 'LLM Provider', value: providerName },
+              { label: `${providerName} Endpoint`, value: getOllamaBaseUrl() },
+              { label: `${providerName} Auth`, value: getOllamaAuth() ? '****** (Configured)' : 'None' },
               { label: 'Verbose JSON Logs', value: isVerboseJsonEnabled() ? 'ON' : 'OFF' },
               { label: 'ADK Info Logs', value: isAdkInfoEnabled() ? 'ON' : 'OFF' }
             ];
@@ -1054,43 +1167,92 @@ export const tool = new FunctionTool({
           continue;
         } 
 
+        else if (command === '/provider') {
+          if (!arg) {
+            const current = getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama';
+            console.log(`\n🤖 ${pc.bold('Current LLM Provider')}: ${pc.magenta(current)}`);
+            const answer = await rl.question(pc.cyan('Enter new provider (1 for Ollama, 2 for LM Studio) › '));
+            const trimmed = answer.trim();
+            if (trimmed === '1') {
+              setLlmProvider('ollama');
+            } else if (trimmed === '2') {
+              setLlmProvider('lmstudio');
+            } else if (trimmed) {
+              setLlmProvider(trimmed);
+            }
+            const resolved = getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama';
+            console.log(pc.green(`✔ LLM Provider successfully switched to: ${pc.bold(resolved)}\n`));
+            displaySettingsTable();
+          } else {
+            setLlmProvider(arg);
+            const resolved = getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama';
+            console.log(pc.green(`✔ LLM Provider successfully switched to: ${pc.bold(resolved)}\n`));
+            displaySettingsTable();
+          }
+          continue;
+        }
+
         else if (command === '/settings') {
+          const provider = getLlmProvider();
+          const providerName = provider === 'lmstudio' ? 'LM Studio' : 'Ollama';
           if (!arg) {
             displaySettingsTable();
-            console.log(pc.dim(`To update Ollama endpoint, use: /settings ollama <url> or /host <url>`));
-            console.log(pc.dim(`To update Ollama authentication, use: /settings auth <token_or_header>`));
+            console.log(pc.dim(`To switch LLM provider, use: /settings provider <ollama|lmstudio>`));
+            console.log(pc.dim(`To update server endpoint, use: /settings endpoint <url> or /host <url>`));
+            console.log(pc.dim(`To update authentication, use: /settings auth <token_or_header>`));
             console.log(pc.dim(`To toggle logs, use: /verbose or /adk-info\n`));
           } else {
             const parts = arg.split(/\s+/).filter(Boolean);
             const key = parts[0].toLowerCase();
             const value = parts.slice(1).join(' ').trim();
             
-            if (['ollama', 'endpoint', 'host'].includes(key)) {
+            if (['provider', 'llm-provider', 'type'].includes(key)) {
               if (!value) {
-                console.log(`\n🔌 ${pc.bold('Current Ollama Endpoint')}: ${pc.magenta(getOllamaBaseUrl())}`);
-                const newHost = await rl.question(pc.cyan('Enter new Ollama Host (e.g. http://10.0.0.5:11434) › '));
+                console.log(`\n🤖 ${pc.bold('Current LLM Provider')}: ${pc.magenta(getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama')}`);
+                const newProvider = await rl.question(pc.cyan('Enter new provider (1 for Ollama, 2 for LM Studio) › '));
+                const trimmed = newProvider.trim();
+                if (trimmed === '1') {
+                  setLlmProvider('ollama');
+                } else if (trimmed === '2') {
+                  setLlmProvider('lmstudio');
+                } else if (trimmed) {
+                  setLlmProvider(trimmed);
+                }
+                const resolved = getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama';
+                console.log(pc.green(`✔ LLM Provider successfully updated to: ${pc.bold(resolved)}\n`));
+                displaySettingsTable();
+              } else {
+                setLlmProvider(value);
+                const resolved = getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama';
+                console.log(pc.green(`✔ LLM Provider successfully updated to: ${pc.bold(resolved)}\n`));
+                displaySettingsTable();
+              }
+            } else if (['ollama', 'endpoint', 'host'].includes(key)) {
+              if (!value) {
+                console.log(`\n🔌 ${pc.bold(`Current ${providerName} Endpoint`)}: ${pc.magenta(getOllamaBaseUrl())}`);
+                const newHost = await rl.question(pc.cyan(`Enter new ${providerName} Host (e.g. http://127.0.0.1:11434) › `));
                 const trimmedHost = newHost.trim();
                 if (trimmedHost) {
                   setOllamaBaseUrl(trimmedHost);
-                  console.log(pc.green(`✔ Ollama Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
+                  console.log(pc.green(`✔ ${providerName} Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
                   displaySettingsTable();
                 }
               } else {
                 setOllamaBaseUrl(value);
-                console.log(pc.green(`✔ Ollama Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
+                console.log(pc.green(`✔ ${providerName} Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
                 displaySettingsTable();
               }
             } else if (['auth', 'token', 'key'].includes(key)) {
               if (!value) {
-                console.log(`\n🔑 ${pc.bold('Current Ollama Auth')}: ${pc.magenta(getOllamaAuth() ? '******' : 'None')}`);
-                const newAuth = await rl.question(pc.cyan('Enter new Ollama Auth (e.g. Bearer token, or custom header X-API-Key:key) › '));
+                console.log(`\n🔑 ${pc.bold(`Current ${providerName} Auth`)}: ${pc.magenta(getOllamaAuth() ? '******' : 'None')}`);
+                const newAuth = await rl.question(pc.cyan(`Enter new ${providerName} Auth (e.g. Bearer token, or custom header X-API-Key:key) › `));
                 const trimmedAuth = newAuth.trim();
                 setOllamaAuth(trimmedAuth);
-                console.log(pc.green(`✔ Ollama Auth successfully updated.\n`));
+                console.log(pc.green(`✔ ${providerName} Auth successfully updated.\n`));
                 displaySettingsTable();
               } else {
                 setOllamaAuth(value);
-                console.log(pc.green(`✔ Ollama Auth successfully updated.\n`));
+                console.log(pc.green(`✔ ${providerName} Auth successfully updated.\n`));
                 displaySettingsTable();
               }
             } else if (key === 'verbose') {
@@ -1221,18 +1383,21 @@ export const tool = new FunctionTool({
         }
         
         else if (command === '/host') {
+          const provider = getLlmProvider();
+          const providerName = provider === 'lmstudio' ? 'LM Studio' : 'Ollama';
           if (!arg) {
-            console.log(`\n🔌 ${pc.bold('Current Ollama Endpoint')}: ${pc.magenta(getOllamaBaseUrl())}`);
-            const newHost = await rl.question(pc.cyan('Enter new Ollama Host (e.g. http://10.0.0.5:11434) › '));
+            console.log(`\n🔌 ${pc.bold(`Current ${providerName} Endpoint`)}: ${pc.magenta(getOllamaBaseUrl())}`);
+            const defaultUrl = provider === 'lmstudio' ? 'http://127.0.0.1:1234' : 'http://127.0.0.1:11434';
+            const newHost = await rl.question(pc.cyan(`Enter new ${providerName} Host (e.g. ${defaultUrl}) › `));
             const trimmedHost = newHost.trim();
             if (trimmedHost) {
               setOllamaBaseUrl(trimmedHost);
-              console.log(pc.green(`✔ Ollama Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
+              console.log(pc.green(`✔ ${providerName} Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
               displaySettingsTable();
             }
           } else {
             setOllamaBaseUrl(arg);
-            console.log(pc.green(`✔ Ollama Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
+            console.log(pc.green(`✔ ${providerName} Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
             displaySettingsTable();
           }
           continue;

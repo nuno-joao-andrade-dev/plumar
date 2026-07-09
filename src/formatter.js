@@ -396,8 +396,9 @@ export function printHelp(topic) {
   console.log(`  ${pc.yellow('/features')}     - Display a detailed overview of premium Plumar features.`);
   console.log(`  ${pc.yellow('/mode')}         - List and switch between agent chat modes.`);
   console.log(`  ${pc.yellow('/mode <name>')}  - Switch directly to a mode (e.g. /mode code).`);
-  console.log(`  ${pc.yellow('/model')}        - Interactively switch active Ollama model.`);
-  console.log(`  ${pc.yellow('/host')}         - Display or dynamically switch Ollama server host.`);
+  console.log(`  ${pc.yellow('/provider')}     - List or switch between Ollama and LM Studio providers.`);
+  console.log(`  ${pc.yellow('/model')}        - Interactively switch active LLM model.`);
+  console.log(`  ${pc.yellow('/host')}         - Display or dynamically switch server host.`);
   console.log(`  ${pc.yellow('/parameter')}    - View, list, or set active model parameters on-the-fly.`);
   console.log(`  ${pc.yellow('/tools')}        - List all file system & system utilities currently loaded.`);
   console.log(`  ${pc.yellow('/samples')}      - Show sample commands/prompts for every tool.`);
@@ -413,7 +414,7 @@ export function printHelp(topic) {
   console.log(`  ${pc.yellow('/verbose')}      - Toggle verbose JSON payload logging (disabled by default).`);
   console.log(`  ${pc.yellow('/adk-info')}     - Toggle ADK internal event logging (disabled by default).`);
   console.log(`  ${pc.yellow('/policy')}       - View or configure allow/ask/deny execution rules for tools.`);
-  console.log(`  ${pc.yellow('/settings')}     - View or dynamically switch settings (e.g. Ollama Endpoint).`);
+  console.log(`  ${pc.yellow('/settings')}     - View or dynamically switch settings (e.g. LLM Provider, Host, Auth).`);
   console.log(`  ${pc.yellow('/clear')}        - Clear terminal console and wipe conversation history.`);
   console.log(`  ${pc.yellow('/exit')} or ${pc.yellow('/quit')} - Safely terminate the CLI application.`);
   console.log(`  ${pc.yellow('Ctrl+R')}        - Interactive reverse-i-search in command and prompt history.\n`);

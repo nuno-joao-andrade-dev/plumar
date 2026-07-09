@@ -6,7 +6,8 @@ import {
   getOllamaHeaders, 
   getModelContextLength,
   getModelDetails,
-  isVerboseJsonEnabled
+  isVerboseJsonEnabled,
+  getLlmProvider
 } from './agent-config.js';
 import { addSessionTokens } from './token-tracker.js';
 import { tools } from './policy-manager.js';
@@ -406,6 +407,9 @@ export class Ollama extends BaseLlm {
       return mappedMsg;
     });
 
+    const provider = getLlmProvider();
+    const providerName = provider === 'lmstudio' ? 'LM Studio' : 'Ollama';
+
     const baseUrl = getOllamaBaseUrl();
     const modelContextLength = await getModelContextLength(this.model);
     
@@ -415,14 +419,32 @@ export class Ollama extends BaseLlm {
       ...this.options
     };
 
-    const payload = {
-      model: this.model,
-      messages: ollamaMessages,
-      tools: ollamaTools,
-      stream: false,
-      temperature: payloadOptions.temperature ?? llmRequest.config?.temperature ?? 0.7,
-      options: payloadOptions
-    };
+    let requestUrl;
+    let requestPayload;
+
+    if (provider === 'lmstudio') {
+      let url = baseUrl;
+      if (!url.endsWith('/v1') && !url.includes('/v1/')) {
+        url = url + '/v1';
+      }
+      requestUrl = `${url}/chat/completions`;
+      requestPayload = {
+        model: this.model,
+        messages: messages, // Standard OpenAI format
+        tools: ollamaTools,
+        temperature: payloadOptions.temperature ?? llmRequest.config?.temperature ?? 0.7
+      };
+    } else {
+      requestUrl = `${baseUrl}/api/chat`;
+      requestPayload = {
+        model: this.model,
+        messages: ollamaMessages,
+        tools: ollamaTools,
+        stream: false,
+        temperature: payloadOptions.temperature ?? llmRequest.config?.temperature ?? 0.7,
+        options: payloadOptions
+      };
+    }
     
     const specLoader = startSpinner(`⏳ Inspecting specs for '${this.model}'...`);
 
@@ -437,29 +459,29 @@ export class Ollama extends BaseLlm {
 
     const isGemma2Spec = familySpec === 'gemma2' || familiesSpec.includes('gemma2') || architectureSpec === 'gemma2';
 
-    if (isGemma2Spec && payload.tools) {
+    if (isGemma2Spec && requestPayload.tools) {
       if (isVerboseJsonEnabled()) {
-        console.log(`[Ollama ADK] Proactively stripping tools from '${this.model}' based on model specs (family/architecture: gemma2) to prevent freeze/hang.`);
+        console.log(`[${providerName} ADK] Proactively stripping tools from '${this.model}' based on model specs (family/architecture: gemma2) to prevent freeze/hang.`);
       }
-      delete payload.tools;
+      delete requestPayload.tools;
     }
 
     if (isVerboseJsonEnabled()) {
-      console.log('Ollama Request Payload:', JSON.stringify(payload, null, 2));
+      console.log(`${providerName} Request Payload:`, JSON.stringify(requestPayload, null, 2));
     }
 
     let response;
     let data;
     let fallbackTextMode = false;
 
-    const chatLoader = startSpinner(`⚡ Awaiting Ollama response ('${this.model}')...`);
+    const chatLoader = startSpinner(`⚡ Awaiting ${providerName} response ('${this.model}')...`);
 
     try {
       try {
-        response = await fetch(`${baseUrl}/api/chat`, {
+        response = await fetch(requestUrl, {
           method: 'POST',
           headers: getOllamaHeaders(),
-          body: JSON.stringify(payload),
+          body: JSON.stringify(requestPayload),
           signal: activeSignal
         });
       } finally {
@@ -476,9 +498,9 @@ export class Ollama extends BaseLlm {
           fallbackTextMode = true;
         } else {
           if (errText.includes('mllama') || errText.includes('unknown model architecture')) {
-            throw new Error(`Ollama API error: ${response.status} ${response.statusText} - ${errText}\n\n💡 This error occurs because your local Ollama server is outdated and does not support the 'mllama' vision architecture required by '${this.model}'. Please update Ollama to v0.4.0 or newer to use llama3.2-vision, or switch to a supported text model using the '/model' command (e.g. '/model qwen2.5:latest' or '/model llama3:latest').`);
+            throw new Error(`${providerName} API error: ${response.status} ${response.statusText} - ${errText}\n\n💡 This error occurs because your local ${providerName} server is outdated and does not support the 'mllama' vision architecture required by '${this.model}'. Please update to the latest version, or switch to a supported text model using the '/model' command (e.g. '/model qwen2.5:latest' or '/model llama3:latest').`);
           }
-          throw new Error(`Ollama API error: ${response.status} ${response.statusText} - ${errText}`);
+          throw new Error(`${providerName} API error: ${response.status} ${response.statusText} - ${errText}`);
         }
       } else {
         data = await response.json();
@@ -494,9 +516,9 @@ export class Ollama extends BaseLlm {
           } else {
             const errStr = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
             if (errStr.includes('mllama') || errStr.includes('unknown model architecture')) {
-              throw new Error(`Ollama error: ${errStr}\n\n💡 This error occurs because your local Ollama server is outdated and does not support the 'mllama' vision architecture required by '${this.model}'. Please update Ollama to v0.4.0 or newer to use llama3.2-vision, or switch to a supported text model using the '/model' command (e.g. '/model qwen2.5:latest' or '/model llama3:latest').`);
+              throw new Error(`${providerName} error: ${errStr}\n\n💡 This error occurs because your local ${providerName} server is outdated and does not support the 'mllama' vision architecture required by '${this.model}'. Please update to the latest version, or switch to a supported text model using the '/model' command (e.g. '/model qwen2.5:latest' or '/model llama3:latest').`);
             }
-            throw new Error(`Ollama error: ${data.error}`);
+            throw new Error(`${providerName} error: ${data.error}`);
           }
         }
       }
@@ -515,22 +537,22 @@ export class Ollama extends BaseLlm {
     }
 
     if (fallbackTextMode) {
-      console.log(`\n\x1b[2m[Ollama ADK] Model '${this.model}' does not support tool-calling. Retrying in text-only mode...\x1b[0m`);
+      console.log(`\n\x1b[2m[${providerName} ADK] Model '${this.model}' does not support tool-calling. Retrying in text-only mode...\x1b[0m`);
       
       // Strip tools from payload
-      delete payload.tools;
+      delete requestPayload.tools;
       
       if (isVerboseJsonEnabled()) {
-        console.log('Ollama Retry Request Payload (no tools):', JSON.stringify(payload, null, 2));
+        console.log(`${providerName} Retry Request Payload (no tools):`, JSON.stringify(requestPayload, null, 2));
       }
 
       const retryLoader = startSpinner(`⚡ Retrying in text-only mode ('${this.model}')...`);
 
       try {
-        response = await fetch(`${baseUrl}/api/chat`, {
+        response = await fetch(requestUrl, {
           method: 'POST',
           headers: getOllamaHeaders(),
-          body: JSON.stringify(payload),
+          body: JSON.stringify(requestPayload),
           signal: activeSignal
         });
       } finally {
@@ -539,25 +561,25 @@ export class Ollama extends BaseLlm {
 
       if (!response.ok) {
         const errText = await response.text();
-        throw new Error(`Ollama API error (retry): ${response.status} ${response.statusText} - ${errText}`);
+        throw new Error(`${providerName} API error (retry): ${response.status} ${response.statusText} - ${errText}`);
       }
 
       data = await response.json();
       if (data && data.error) {
-        throw new Error(`Ollama error (retry): ${data.error}`);
+        throw new Error(`${providerName} error (retry): ${data.error}`);
       }
     }
 
     if (isVerboseJsonEnabled()) {
-      console.log('Ollama Response Payload:', JSON.stringify(data, null, 2));
+      console.log(`${providerName} Response Payload:`, JSON.stringify(data, null, 2));
     }
 
     const message = data.message || data.choices?.[0]?.message;
     if (!message) {
-      throw new Error('Invalid or empty response from Ollama.');
+      throw new Error(`Invalid or empty response from ${providerName}.`);
     }
 
-    // Intercept any native or embedded images in the Ollama response to decode and save them
+    // Intercept any native or embedded images in the response to decode and save them
     const responseImages = message.images || data.images || [];
     let extractedBase64 = null;
     let foundEmbeddedImage = false;
@@ -575,12 +597,12 @@ export class Ollama extends BaseLlm {
 
     let text = message.content || '';
 
-    let inputTokens = data.prompt_eval_count;
-    let outputTokens = data.eval_count;
+    let inputTokens = data.prompt_eval_count || data.usage?.prompt_tokens;
+    let outputTokens = data.eval_count || data.usage?.completion_tokens;
 
     // Robust fallback estimation if token counts are missing/undefined
     if (typeof inputTokens !== 'number') {
-      const payloadStr = JSON.stringify(payload.messages || '');
+      const payloadStr = JSON.stringify(requestPayload.messages || '');
       inputTokens = Math.ceil(payloadStr.length / 4);
     }
     if (typeof outputTokens !== 'number') {
@@ -765,20 +787,33 @@ export class Ollama extends BaseLlm {
 }
 
 /**
- * Fetch available models from the local Ollama instance
+ * Fetch available models from the local Ollama or LM Studio instance
  * @param {boolean} [detailed=false] If true, returns full model metadata objects. If false, returns model name strings.
  * @returns {Promise<Array<string|object>>} List of model names or model objects
  */
 export async function fetchOllamaModels(detailed = false) {
-  const modelsLoader = startSpinner('⏳ Fetching installed models from Ollama...');
+  const provider = getLlmProvider();
+  const providerName = provider === 'lmstudio' ? 'LM Studio' : 'Ollama';
+  const modelsLoader = startSpinner(`⏳ Fetching installed models from ${providerName}...`);
   try {
     const baseUrl = getOllamaBaseUrl();
     let response;
     try {
-      response = await fetch(`${baseUrl}/api/tags`, {
-        headers: getOllamaHeaders(),
-        signal: AbortSignal.timeout(5000)
-      });
+      if (provider === 'lmstudio') {
+        let url = baseUrl;
+        if (!url.endsWith('/v1') && !url.includes('/v1/')) {
+          url = url + '/v1';
+        }
+        response = await fetch(`${url}/models`, {
+          headers: getOllamaHeaders(),
+          signal: AbortSignal.timeout(5000)
+        });
+      } else {
+        response = await fetch(`${baseUrl}/api/tags`, {
+          headers: getOllamaHeaders(),
+          signal: AbortSignal.timeout(5000)
+        });
+      }
     } finally {
       modelsLoader.stop();
     }
@@ -786,14 +821,27 @@ export async function fetchOllamaModels(detailed = false) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     const data = await response.json();
-    if (!data.models || data.models.length === 0) {
-      return [];
+    
+    if (provider === 'lmstudio') {
+      if (!data.data || data.data.length === 0) {
+        return [];
+      }
+      if (detailed) {
+        // Map LM Studio models to standard schema { name: id }
+        return data.data.map(m => ({ name: m.id, id: m.id, details: { family: '', families: [] } }));
+      }
+      return data.data.map(m => m.id);
+    } else {
+      if (!data.models || data.models.length === 0) {
+        return [];
+      }
+      if (detailed) {
+        return data.models;
+      }
+      return data.models.map(m => m.name);
     }
-    if (detailed) {
-      return data.models;
-    }
-    return data.models.map(m => m.name);
   } catch (error) {
-    throw new Error(`Ollama API at ${getOllamaBaseUrl()} is unreachable or non-responsive. Please make sure Ollama is running and accessible.`);
+    const baseUrl = getOllamaBaseUrl();
+    throw new Error(`${providerName} API at ${baseUrl} is unreachable or non-responsive. Please make sure ${providerName} is running and accessible.`);
   }
 }

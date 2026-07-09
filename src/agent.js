@@ -14,7 +14,15 @@ import {
   getOllamaAuth,
   setOllamaAuth,
   getOllamaHeaders,
-  getModelContextLength
+  getModelContextLength,
+  getLlmProvider,
+  setLlmProvider,
+  getOllamaHost,
+  setOllamaHost,
+  getLmStudioHost,
+  setLmStudioHost,
+  getLmStudioAuth,
+  setLmStudioAuth
 } from './agent-config.js';
 
 import {
@@ -63,6 +71,14 @@ export {
   setOllamaAuth,
   getOllamaHeaders,
   getModelContextLength,
+  getLlmProvider,
+  setLlmProvider,
+  getOllamaHost,
+  setOllamaHost,
+  getLmStudioHost,
+  setLmStudioHost,
+  getLmStudioAuth,
+  setLmStudioAuth,
   tools,
   registerMcpTools,
   setReadlineInterface,

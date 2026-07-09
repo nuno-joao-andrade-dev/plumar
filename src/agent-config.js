@@ -32,16 +32,76 @@ export function setVerboseJsonEnabled(enabled) {
   verboseJsonEnabled = !!enabled;
 }
 
-// Resolve the Ollama server base URL from environment or fallback to localhost
+let llmProvider = process.env.LLM_PROVIDER || 'ollama';
+
+export function getLlmProvider() {
+  return llmProvider;
+}
+
+export function setLlmProvider(provider) {
+  if (provider && (provider.toLowerCase() === 'lmstudio' || provider.toLowerCase() === 'lm-studio')) {
+    llmProvider = 'lmstudio';
+  } else {
+    llmProvider = 'ollama';
+  }
+  process.env.LLM_PROVIDER = llmProvider;
+  triggerConfigChange();
+}
+
+let ollamaHost = process.env.OLLAMA_HOST || 'http://localhost:11434';
+let lmStudioHost = process.env.LMSTUDIO_HOST || 'http://localhost:1234';
+
+export function getOllamaHost() {
+  if (!ollamaHost.startsWith('http://') && !ollamaHost.startsWith('https://')) {
+    ollamaHost = 'http://' + ollamaHost;
+  }
+  if (ollamaHost.endsWith('/')) {
+    ollamaHost = ollamaHost.slice(0, -1);
+  }
+  return ollamaHost;
+}
+
+export function setOllamaHost(url) {
+  if (!url) return;
+  let formattedUrl = url.trim();
+  if (!formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) {
+    formattedUrl = 'http://' + formattedUrl;
+  }
+  if (formattedUrl.endsWith('/')) {
+    formattedUrl = formattedUrl.slice(0, -1);
+  }
+  ollamaHost = formattedUrl;
+  process.env.OLLAMA_HOST = formattedUrl;
+  triggerConfigChange();
+}
+
+export function getLmStudioHost() {
+  if (!lmStudioHost.startsWith('http://') && !lmStudioHost.startsWith('https://')) {
+    lmStudioHost = 'http://' + lmStudioHost;
+  }
+  if (lmStudioHost.endsWith('/')) {
+    lmStudioHost = lmStudioHost.slice(0, -1);
+  }
+  return lmStudioHost;
+}
+
+export function setLmStudioHost(url) {
+  if (!url) return;
+  let formattedUrl = url.trim();
+  if (!formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) {
+    formattedUrl = 'http://' + formattedUrl;
+  }
+  if (formattedUrl.endsWith('/')) {
+    formattedUrl = formattedUrl.slice(0, -1);
+  }
+  lmStudioHost = formattedUrl;
+  process.env.LMSTUDIO_HOST = formattedUrl;
+  triggerConfigChange();
+}
+
+// Resolve the active server base URL
 export function getOllamaBaseUrl() {
-  let host = process.env.OLLAMA_HOST || 'http://localhost:11434';
-  if (!host.startsWith('http://') && !host.startsWith('https://')) {
-    host = 'http://' + host;
-  }
-  if (host.endsWith('/')) {
-    host = host.slice(0, -1);
-  }
-  return host;
+  return llmProvider === 'lmstudio' ? getLmStudioHost() : getOllamaHost();
 }
 
 let onConfigChangeCallback = null;
@@ -57,19 +117,15 @@ function triggerConfigChange() {
 
 // Allow dynamic, in-session server host switching
 export function setOllamaBaseUrl(url) {
-  if (!url) return;
-  let formattedUrl = url.trim();
-  if (!formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) {
-    formattedUrl = 'http://' + formattedUrl;
+  if (llmProvider === 'lmstudio') {
+    setLmStudioHost(url);
+  } else {
+    setOllamaHost(url);
   }
-  if (formattedUrl.endsWith('/')) {
-    formattedUrl = formattedUrl.slice(0, -1);
-  }
-  process.env.OLLAMA_HOST = formattedUrl;
-  triggerConfigChange();
 }
 
 let ollamaAuth = process.env.OLLAMA_AUTH || '';
+let lmStudioAuth = process.env.LMSTUDIO_AUTH || '';
 
 export function getOllamaAuth() {
   return ollamaAuth;
@@ -81,9 +137,19 @@ export function setOllamaAuth(auth) {
   triggerConfigChange();
 }
 
+export function getLmStudioAuth() {
+  return lmStudioAuth;
+}
+
+export function setLmStudioAuth(auth) {
+  lmStudioAuth = auth ? auth.trim() : '';
+  process.env.LMSTUDIO_AUTH = lmStudioAuth;
+  triggerConfigChange();
+}
+
 export function getOllamaHeaders() {
   const headers = { 'Content-Type': 'application/json' };
-  const auth = getOllamaAuth();
+  const auth = llmProvider === 'lmstudio' ? getLmStudioAuth() : getOllamaAuth();
   if (auth) {
     if (auth.includes(':')) {
       const index = auth.indexOf(':');
@@ -101,6 +167,17 @@ const modelDetailsCache = {};
 
 export async function getModelDetails(modelName) {
   if (!modelName) return null;
+  if (getLlmProvider() === 'lmstudio') {
+    return {
+      details: {
+        family: '',
+        families: []
+      },
+      model_info: {
+        'general.architecture': ''
+      }
+    };
+  }
   if (modelDetailsCache[modelName]) {
     return modelDetailsCache[modelName];
   }
