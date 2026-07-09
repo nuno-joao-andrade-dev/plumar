@@ -116,6 +116,9 @@ sessionService.appendEvent = async function({ session, event }) {
 export async function runAgentTurn(sessionId, userMessage, modelName, modeKey = 'balanced', abortSignal = null, customTemperature = null, customParameters = {}) {
   const modeMeta = CHAT_MODES[modeKey] || CHAT_MODES.balanced;
 
+  // Set process.env.ACTIVE_MODEL so that any tool executing in this turn can access the model name
+  process.env.ACTIVE_MODEL = modelName || '';
+
   // Gather all Ollama parameters from mode defaults and overrides
   const parameters = {};
   const paramKeys = [
@@ -154,11 +157,8 @@ export async function runAgentTurn(sessionId, userMessage, modelName, modeKey = 
   const lowerModelName = modelName ? modelName.toLowerCase() : '';
   const isImageCapable = lowerModelName.includes('gemma4') || lowerModelName.includes('gemma 4') || lowerModelName.includes('gemma-4');
 
-  // We completely filter out the generateImage tool from all model runs to ensure no model calls generateImage directly.
-  // Instead, image-capable models are forced to natively output Base64 data and call base64Convert,
-  // and text-only models are forced to respond that they cannot generate images.
-  let filteredTools = Object.values(tools).filter(t => t.name !== 'generateImage');
-  const wrappedTools = filteredTools.map(wrapFunctionTool);
+  // Wrap all current local and MCP tools (including generateImage) to expose them to the model run directly
+  const wrappedTools = Object.values(tools).map(wrapFunctionTool);
 
   // 3. Create the LlmAgent
   let systemPrompt = modeMeta.systemPrompt;
@@ -177,14 +177,25 @@ export async function runAgentTurn(sessionId, userMessage, modelName, modeKey = 
 
 ### Image Generation Guidance
 When the user asks to generate or create an image file (e.g., "generate an image of a car", "create a cat image"):
-1. **NATIVE MODEL IMAGE GENERATION (REQUIRED)**: You natively support image generation (such as gemma4) and can output raw image bytes or Base64 image data directly. You MUST generate the image yourself and embed the Base64 image data directly within your response text (either as a raw Base64 word of at least 500 characters, or inside a standard markdown code block, e.g., \`\`\` <your_base64_data> \`\`\`). Do NOT call any tools (including \`base64Convert\` or \`generateImage\`) to generate or save the image. The system will automatically intercept, decode, and save your embedded Base64 image to the requested path without any tool execution.
+1. **NATIVE MODEL IMAGE GENERATION**: You natively support image generation (such as gemma4) and can output raw image bytes or Base64 image data directly. You can generate the image yourself and embed the Base64 image data directly within your response text (either as a raw Base64 word of at least 500 characters, or inside a standard markdown code block, e.g., \`\`\` <your_base64_data> \`\`\`). The system will automatically intercept, decode, and save your embedded Base64 image to the requested path without any tool execution.
+2. **LOCAL TOOL IMAGE GENERATION**: Alternatively, you can call the \`generateImage\` tool directly to procedurally generate custom offline images (PNG/JPEG) and save them to a specified path inside the workspace.
 `;
   } else {
     systemPrompt += `
 
 ### Image Generation Guidance
-When the user asks to generate or create an image file (e.g., "generate an image of a car", "create a cat image"):
-1. **TEXT-ONLY LIMITATION (REQUIRED)**: You are a text-only model. You cannot natively generate images or output raw/Base64 image data. Therefore, you MUST NOT attempt to call the \`generateImage\` tool or any other tool to create an image, and you must NOT output raw image data. Instead, you MUST explicitly state in your response that you cannot generate images because you are a text-only model.
+When the user asks to generate or create an image file (e.g., "generate an image of a car", "create a cat image", "generate an image of ... call it ..."):
+1. **LOCAL TOOL IMAGE GENERATION**: Even though you are a text-only model, you have access to the \`generateImage\` tool. To generate the image, you MUST call the \`generateImage\` tool using the text-based JSON fallback structure. Do not refuse.
+Format of the tool call inside your response:
+\`\`\`json
+{
+  "name": "generateImage",
+  "arguments": {
+    "outputPath": "requested_filename.png",
+    "prompt": "detailed visual description of the requested image"
+  }
+}
+\`\`\`
 `;
   }
 
@@ -196,6 +207,19 @@ When the user asks you to "execute in background", "run in background", "start t
 1. **YOU CAN RUN BACKGROUND COMMANDS**: You have the full ability to run shell commands, applications, and services in the background using the \`executeCommand\` tool. To do so, invoke \`executeCommand\` with standard shell background operators (for example, appending \` &\` to the shell command, or using \`nohup <command> > background.log 2>&1 &\`).
 2. **DO NOT REFUSE**: Never refuse background execution requests by claiming you do not have graphical/process management access or a background execution environment. You run inside a Linux terminal workspace environment with standard process management capability via \`executeCommand\`.
 `;
+
+  // Append standard guidance on multimodal & image analysis (OCR/description)
+  systemPrompt += `
+
+### Multimodal & Image Analysis Guidance
+When the user requests to read, analyze, extract text, or perform OCR on an image file (such as PNG, JPEG, WEBP, etc.) in the workspace:
+1. **DO NOT USE readFile ON IMAGES**: Never call \`readFile\` to read raw binary image files. It will fail or return binary data.
+2. **USE ocrImage FOR OCR / TEXT EXTRACTION**: To extract text from an image, always call the \`ocrImage\` tool with the path to the image file (e.g., \`ocrImage({ imagePath: "path/to/image.png" })\`).
+3. **USE readAndSendImage FOR DESCRIPTION / ANALYSIS**: To ask questions, describe, or analyze an image, call the \`readAndSendImage\` tool with the path to the image and your specific question or prompt.
+`;
+
+  // Append standard tools reference for text-fallback
+  systemPrompt += '\n\n' + formatToolsForPrompt(tools);
 
   const agent = new LlmAgent({
     name: modeKey,
@@ -290,4 +314,40 @@ When the user asks you to "execute in background", "run in background", "start t
     text: finalResponseText,
     steps: steps
   };
+}
+
+/**
+ * Format registered tools and their parameter schemas as markdown for the system prompt
+ */
+function formatToolsForPrompt(toolsMap) {
+  let text = '### Available Tools & Parameter Schemas\n';
+  text += 'Below is a complete reference of the tools you can invoke in this environment. If your environment or model does not support native tool calling, you MUST invoke tools by writing a JSON code block in your response containing the exact "name" (tool name) and "arguments" (object matching the parameter types below). Always ensure you provide the required parameters.\n\n';
+  
+  for (const [name, toolObj] of Object.entries(toolsMap)) {
+    text += `- **${name}**: ${toolObj.description || 'No description available.'}\n`;
+    if (toolObj.parameters) {
+      text += `  - **Parameters**:\n`;
+      try {
+        let shape = {};
+        if (toolObj.parameters.shape) {
+          shape = toolObj.parameters.shape;
+        } else if (toolObj.parameters._def && toolObj.parameters._def.shape) {
+          shape = toolObj.parameters._def.shape;
+          if (typeof shape === 'function') {
+            shape = shape();
+          }
+        }
+        
+        for (const [propName, propSchema] of Object.entries(shape)) {
+          const isOptional = propSchema.isOptional ? propSchema.isOptional() : false;
+          const description = propSchema.description || propSchema._def?.description || '';
+          text += `    - \`${propName}\` (${isOptional ? 'optional' : 'required'}): ${description}\n`;
+        }
+      } catch (e) {
+        text += `    - (Dynamic parameters inspection failed)\n`;
+      }
+    }
+    text += '\n';
+  }
+  return text;
 }

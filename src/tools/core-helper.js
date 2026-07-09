@@ -6,15 +6,10 @@ export const WORKSPACE_DIR = process.cwd();
 export const INSTALL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 export const getGenAIClient = () => {
-  const apiKey = process.env.GOOGLE_GENAI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-  if (!apiKey) return null;
-  try {
-    return new GoogleGenAI({ apiKey });
-  } catch (err) {
-    console.error('[GenAI] Failed to initialize GoogleGenAI client:', err.message);
-    return null;
-  }
+  // Enforce 100% local-only model constraint. External cloud models are disabled.
+  return null;
 };
+
 
 // Safe path resolver to prevent path traversal outside the workspace
 export function resolveSafePath(relativeOrAbsolutePath) {

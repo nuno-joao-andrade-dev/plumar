@@ -475,6 +475,9 @@ export class Ollama extends BaseLlm {
         if (isToolErr) {
           fallbackTextMode = true;
         } else {
+          if (errText.includes('mllama') || errText.includes('unknown model architecture')) {
+            throw new Error(`Ollama API error: ${response.status} ${response.statusText} - ${errText}\n\n💡 This error occurs because your local Ollama server is outdated and does not support the 'mllama' vision architecture required by '${this.model}'. Please update Ollama to v0.4.0 or newer to use llama3.2-vision, or switch to a supported text model using the '/model' command (e.g. '/model qwen2.5:latest' or '/model llama3:latest').`);
+          }
           throw new Error(`Ollama API error: ${response.status} ${response.statusText} - ${errText}`);
         }
       } else {
@@ -489,6 +492,10 @@ export class Ollama extends BaseLlm {
           if (isToolErr) {
             fallbackTextMode = true;
           } else {
+            const errStr = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+            if (errStr.includes('mllama') || errStr.includes('unknown model architecture')) {
+              throw new Error(`Ollama error: ${errStr}\n\n💡 This error occurs because your local Ollama server is outdated and does not support the 'mllama' vision architecture required by '${this.model}'. Please update Ollama to v0.4.0 or newer to use llama3.2-vision, or switch to a supported text model using the '/model' command (e.g. '/model qwen2.5:latest' or '/model llama3:latest').`);
+            }
             throw new Error(`Ollama error: ${data.error}`);
           }
         }

@@ -723,6 +723,33 @@ test('14. New Developer and Dino Game tools', async (t) => {
 
     // Interception of invalid base64 image decoding (Self-healing test)
     const tempCakeFile = 'test_cake.jpg';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/tags')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ models: [{ name: 'llama3' }] })
+        };
+      }
+      if (typeof url === 'string' && url.includes('/api/chat')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            message: {
+              role: 'assistant',
+              content: '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA='
+            }
+          })
+        };
+      }
+      if (typeof originalFetch === 'function') {
+        return originalFetch(url, options);
+      }
+      throw new Error(`Unexpected fetch call in test: ${url}`);
+    };
+
     try {
       const b64Res = await tools.base64Convert.execute({
         action: 'decode',
@@ -738,6 +765,7 @@ test('14. New Developer and Dino Game tools', async (t) => {
       assert.strictEqual(fileBytes[0], 0xff);
       assert.strictEqual(fileBytes[1], 0xd8);
     } finally {
+      globalThis.fetch = originalFetch;
       try {
         await fs.unlink(tempCakeFile);
       } catch {}
@@ -812,7 +840,13 @@ test('15. generateImage tool', async (t) => {
     try {
       const res = await tools.generateImage.execute({
         outputPath: testPath,
-        prompt: 'a small cute potato image'
+        prompt: 'a small cute potato image',
+        drawings: [
+          { type: 'ellipse', x: 200, y: 200, rx: 120, ry: 80, color: '#8B5A2B' },
+          { type: 'ellipse', x: 140, y: 180, rx: 6, ry: 4, color: '#5c3a1c' },
+          { type: 'ellipse', x: 248, y: 220, rx: 5, ry: 5, color: '#5c3a1c' },
+          { type: 'text', x: 150, y: 312, text: 'POTATO', scale: 3, color: '#ffffff' }
+        ]
       });
       assert.deepStrictEqual(res.success, true);
       assert.deepStrictEqual(res.outputPath, testPath);
@@ -1024,7 +1058,119 @@ test('17. Advanced Developer Tools', async (t) => {
   });
 });
 
+test('18. Multi-modal and OCR Tools', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const testImagePath = 'test_ocr_sample.png';
 
+  // Setup a dummy image file
+  t.before(async () => {
+    await fs.writeFile(testImagePath, 'fake image data');
+  });
 
+  t.after(async () => {
+    try {
+      await fs.unlink(testImagePath);
+    } catch {}
+  });
 
+  await t.test('ocrImage: should successfully extract text from image using Ollama vision model', async () => {
+    let fetchCalled = false;
+    let payloadSent = null;
 
+    globalThis.fetch = async (url, options) => {
+      fetchCalled = true;
+      payloadSent = JSON.parse(options.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          message: {
+            role: 'assistant',
+            content: 'CONFIDENTIAL\nDO NOT DISTRIBUTE'
+          }
+        })
+      };
+    };
+
+    try {
+      const res = await tools.ocrImage.execute({ imagePath: testImagePath });
+      assert.deepStrictEqual(res.success, true);
+      assert.strictEqual(res.message, 'OCR completed successfully.');
+      assert.strictEqual(res.extractedText, 'CONFIDENTIAL\nDO NOT DISTRIBUTE');
+      assert.ok(fetchCalled);
+      assert.ok(payloadSent);
+      assert.strictEqual(payloadSent.messages[0].images[0], Buffer.from('fake image data').toString('base64'));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  await t.test('ocrImage: should return graceful error if model does not support multimodal/image inputs', async () => {
+    globalThis.fetch = async (url, options) => {
+      return {
+        ok: false,
+        status: 400,
+        text: async () => 'does not support multimodal/image inputs'
+      };
+    };
+
+    try {
+      const res = await tools.ocrImage.execute({ imagePath: testImagePath });
+      assert.deepStrictEqual(res.success, false);
+      assert.match(res.error, /does not support multimodal\/image inputs/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  await t.test('ocrImage: should fail gracefully for non-existent image file', async () => {
+    const res = await tools.ocrImage.execute({ imagePath: 'non_existent_file.png' });
+    assert.deepStrictEqual(res.success, false);
+    assert.match(res.error, /ENOENT/);
+  });
+
+  await t.test('readAndSendImage: should successfully analyze image with custom prompt', async () => {
+    let fetchCalled = false;
+    let payloadSent = null;
+
+    globalThis.fetch = async (url, options) => {
+      fetchCalled = true;
+      payloadSent = JSON.parse(options.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          message: {
+            role: 'assistant',
+            content: 'This image contains text saying confidential.'
+          }
+        })
+      };
+    };
+
+    try {
+      const res = await tools.readAndSendImage.execute({
+        imagePath: testImagePath,
+        prompt: 'Describe this image'
+      });
+      assert.deepStrictEqual(res.success, true);
+      assert.strictEqual(res.message, 'Image analyzed successfully.');
+      assert.strictEqual(res.response, 'This image contains text saying confidential.');
+      assert.ok(fetchCalled);
+      assert.ok(payloadSent);
+      assert.strictEqual(payloadSent.messages[0].content, 'Describe this image');
+      assert.strictEqual(payloadSent.messages[0].images[0], Buffer.from('fake image data').toString('base64'));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  await t.test('readAndSendImage: should fail gracefully for non-existent image file', async () => {
+    const res = await tools.readAndSendImage.execute({
+      imagePath: 'non_existent_file.png',
+      prompt: 'Describe this image'
+    });
+    assert.deepStrictEqual(res.success, false);
+    assert.match(res.error, /ENOENT/);
+  });
+});

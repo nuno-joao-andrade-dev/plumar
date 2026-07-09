@@ -4,6 +4,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { resolveSafePath, parseHexColor, getGenAIClient } from './core-helper.js';
 import { FONT_5X7, blockFont, slantFont, renderText } from './ascii-fonts.js';
+import { getOllamaBaseUrl, getOllamaHeaders } from '../agent-config.js';
 
 export const mediaTools = {
   createAsciiArt: new FunctionTool({
@@ -399,6 +400,7 @@ export const mediaTools = {
       width: z.number().int().min(10).max(2000).optional().default(400).describe('Width of the image in pixels. Default is 400.'),
       height: z.number().int().min(10).max(2000).optional().default(400).describe('Height of the image in pixels. Default is 400.'),
       backgroundColor: z.string().optional().default('#334455').describe('Standard hex color code for the background (e.g. "#334455" or "#ffffff").'),
+      timeout: z.number().int().optional().default(600).describe('The timeout in seconds for local LLM image generation (default 600).'),
       drawings: z.array(z.object({
         type: z.enum(['ellipse', 'circle', 'rect', 'line', 'text']),
         x: z.number().optional().describe('Center X coordinate for ellipse/circle, or start X for rect/text.'),
@@ -418,77 +420,136 @@ export const mediaTools = {
         scale: z.number().optional().default(1).describe('Font scale factor for text drawing (default is 1).')
       })).optional().describe('Optional custom drawing commands. If provided, the model can specify a list of shapes, lines, and text to construct highly specific or complex custom images.')
     }),
-    execute: async ({ outputPath, prompt, width = 400, height = 400, backgroundColor = '#334455', drawings }) => {
+    execute: async ({ outputPath, prompt, width = 400, height = 400, backgroundColor = '#334455', timeout = 600, drawings }) => {
       try {
         const { Jimp } = await import('jimp');
         const resolvedPath = resolveSafePath(outputPath);
 
-        // Try to generate using Google GenAI (Imagen) if API key is present
-        if (!drawings || drawings.length === 0) {
-          const ai = getGenAIClient();
-          if (ai) {
-            try {
-              console.log(`[generateImage] Using Google GenAI (Imagen) to generate: "${prompt}"`);
-              const response = await ai.models.generateImages({
-                model: 'imagen-3.0-generate-002',
-                prompt: prompt,
-                config: {
-                  numberOfImages: 1,
-                  outputMimeType: outputPath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
-                }
-              });
-              
-              if (response && response.generatedImages && response.generatedImages[0] && response.generatedImages[0].image && response.generatedImages[0].image.imageBytes) {
-                const base64Bytes = response.generatedImages[0].image.imageBytes;
-                const buffer = Buffer.from(base64Bytes, 'base64');
-                const img = await Jimp.read(buffer);
-                if (img.bitmap.width !== width || img.bitmap.height !== height) {
-                  await img.resize({ w: width, h: height });
-                }
-                await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
-                await img.write(resolvedPath);
-                return {
-                  success: true,
-                  message: `Successfully generated high-quality image of "${prompt}" using Google GenAI (Imagen) and saved to "${outputPath}".`,
-                  outputPath,
-                  width,
-                  height,
-                  prompt
-                };
-              }
-            } catch (apiErr) {
-              console.log(`[generateImage] Google GenAI Imagen call failed: ${apiErr.message}. Falling back to other online/local methods.`);
+        const cleanBase64String = (raw) => {
+          if (!raw) return '';
+          let cleaned = raw.replace(/data:image\/[a-zA-Z]+;base64,/gi, '');
+          cleaned = cleaned.replace(/[^A-Za-z0-9+/=]/g, '');
+          return cleaned;
+        };
+
+        const robustExtractBase64 = (text) => {
+          if (!text || typeof text !== 'string') return '';
+          
+          const codeBlockRegex = /```(?:[a-zA-Z0-9_-]+)?\s*([\s\S]+?)\s*```/g;
+          let match;
+          let candidates = [];
+          while ((match = codeBlockRegex.exec(text)) !== null) {
+            candidates.push(match[1]);
+          }
+          
+          if (candidates.length > 0) {
+            for (let raw of candidates) {
+              const cleaned = cleanBase64String(raw);
+              if (cleaned.length >= 16) return cleaned;
             }
+          }
+          
+          const dataUriRegex = /data:image\/[a-zA-Z]+;base64,([a-zA-Z0-9+/=\s\n\r]+)/i;
+          const dataUriMatch = dataUriRegex.exec(text);
+          if (dataUriMatch) {
+            const cleaned = cleanBase64String(dataUriMatch[1]);
+            if (cleaned.length >= 16) return cleaned;
+          }
+          
+          const base64Regex = /[A-Za-z0-9+/]{16,}=*/g;
+          let longestBase64 = '';
+          let m;
+          while ((m = base64Regex.exec(text)) !== null) {
+            if (m[0].length > longestBase64.length) {
+              longestBase64 = m[0];
+            }
+          }
+          
+          if (longestBase64.length >= 16) {
+            return cleanBase64String(longestBase64);
+          }
+          
+          return cleanBase64String(text);
+        };
+
+        if (!drawings || drawings.length === 0) {
+          let modelName = process.env.ACTIVE_MODEL;
+          if (!modelName) {
+            try {
+              const baseUrl = getOllamaBaseUrl();
+              const response = await fetch(`${baseUrl}/api/tags`, {
+                method: 'GET',
+                headers: getOllamaHeaders(),
+                signal: AbortSignal.timeout(5000)
+              });
+              if (response.ok) {
+                const data = await response.json();
+                if (data.models && data.models.length > 0) {
+                  modelName = data.models[0].name;
+                }
+              }
+            } catch (err) {
+              console.log(`[generateImage] Failed to fetch Ollama models: ${err.message}`);
+            }
+          }
+          if (!modelName) {
+            modelName = 'llama3';
           }
 
-          // Try to fetch a high-quality AI-generated image from a public generative model endpoint when online
+          const baseUrl = getOllamaBaseUrl();
+          const headers = getOllamaHeaders();
+          
+          console.log(`[generateImage] Communicating with local LLM (${modelName}) to generate image base64 with a ${timeout}s timeout...`);
+          
+          let response;
           try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout so it doesn't hang if offline
-            const encodedPrompt = encodeURIComponent(prompt);
-            const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true`;
-            
-            const response = await fetch(url, { signal: controller.signal });
-            clearTimeout(timeoutId);
-            
-            if (response.ok) {
-              const arrayBuffer = await response.arrayBuffer();
-              const fetchedImage = await Jimp.read(Buffer.from(arrayBuffer));
-              await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
-              await fetchedImage.write(resolvedPath);
-              return {
-                success: true,
-                message: `Successfully generated high-quality image of "${prompt}" using the generative image model, and saved it to "${outputPath}".`,
-                outputPath,
-                width,
-                height,
-                prompt
-              };
+            response = await fetch(`${baseUrl}/api/chat`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                model: modelName,
+                messages: [
+                  {
+                    role: 'user',
+                    content: `You are a local image generator model that outputs a Base64-encoded JPEG image based on the prompt. Generate a Base64 JPEG string representing: '${prompt}'. Return ONLY the raw base64 string, with no markdown formatting, no conversational text, and no explanation.`
+                  }
+                ],
+                stream: false
+              }),
+              signal: AbortSignal.timeout(timeout * 1000)
+            });
+          } catch (err) {
+            if (err.name === 'TimeoutError' || err.message.includes('timeout') || err.message.includes('aborted')) {
+              throw new Error(`[generateImage] Local LLM call failed or timed out: The operation was aborted due to timeout.`);
             }
-          } catch (fetchErr) {
-            // Silently log and proceed to local procedural rendering fallback
-            console.log(`[generateImage] Online generator unavailable, falling back to local renderer: ${fetchErr.message}`);
+            throw err;
           }
+
+          if (!response.ok) {
+            const errText = await response.text().catch(() => '');
+            throw new Error(`Local LLM API error (status ${response.status}): ${errText}`);
+          }
+
+          const data = await response.json();
+          const textResponse = data.message?.content || '';
+          
+          const base64Str = robustExtractBase64(textResponse);
+          if (!base64Str) {
+            throw new Error(`Failed to extract base64-encoded image data from the LLM response.`);
+          }
+
+          const buffer = Buffer.from(base64Str, 'base64');
+          await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
+          await fs.writeFile(resolvedPath, buffer);
+
+          return {
+            success: true,
+            message: `Successfully generated offline image for prompt "${prompt}" and saved to "${outputPath}".`,
+            outputPath,
+            width,
+            height,
+            prompt
+          };
         }
 
         const bgInt = parseHexColor(backgroundColor);
@@ -903,6 +964,153 @@ export const mediaTools = {
         };
       } catch (error) {
         console.error(`[generateVideo] Error: ${error.message}`);
+        return { success: false, error: error.message };
+      }
+    }
+  }),
+
+  ocrImage: new FunctionTool({
+    name: 'ocrImage',
+    description: 'Extract and transcribe all readable text from an image in the workspace using local Ollama vision model.',
+    parameters: z.object({
+      imagePath: z.string().describe('Relative or absolute path to the image file in the workspace.')
+    }),
+    execute: async ({ imagePath }) => {
+      try {
+        const resolvedPath = resolveSafePath(imagePath);
+        const buffer = await fs.readFile(resolvedPath);
+        const base64Image = buffer.toString('base64');
+
+        let modelName = process.env.ACTIVE_MODEL;
+        if (!modelName) {
+          try {
+            const baseUrl = getOllamaBaseUrl();
+            const response = await fetch(`${baseUrl}/api/tags`, {
+              method: 'GET',
+              headers: getOllamaHeaders(),
+              signal: AbortSignal.timeout(5000)
+            });
+            if (response.ok) {
+              const data = await response.json();
+              if (data.models && data.models.length > 0) {
+                modelName = data.models[0].name;
+              }
+            }
+          } catch (err) {
+            console.log(`[ocrImage] Failed to fetch Ollama models: ${err.message}`);
+          }
+        }
+        if (!modelName) {
+          modelName = 'llama3';
+        }
+
+        const baseUrl = getOllamaBaseUrl();
+        const headers = getOllamaHeaders();
+
+        const response = await fetch(`${baseUrl}/api/chat`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: modelName,
+            messages: [
+              {
+                role: 'user',
+                content: 'Extract and transcribe all readable text from this image. Do not add explanations, headers, or metadata, just return the transcribed text.',
+                images: [base64Image]
+              }
+            ],
+            stream: false
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text().catch(() => '');
+          throw new Error(`Local LLM API error (status ${response.status}): ${errText}`);
+        }
+
+        const data = await response.json();
+        const extractedText = data.message?.content || '';
+
+        return {
+          success: true,
+          message: 'OCR completed successfully.',
+          extractedText
+        };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+  }),
+
+  readAndSendImage: new FunctionTool({
+    name: 'readAndSendImage',
+    description: 'Ask questions, describe, or analyze an image in the workspace using local Ollama vision model.',
+    parameters: z.object({
+      imagePath: z.string().describe('Relative or absolute path to the image file in the workspace.'),
+      prompt: z.string().describe('Custom question or analysis prompt for the image.')
+    }),
+    execute: async ({ imagePath, prompt }) => {
+      try {
+        const resolvedPath = resolveSafePath(imagePath);
+        const buffer = await fs.readFile(resolvedPath);
+        const base64Image = buffer.toString('base64');
+
+        let modelName = process.env.ACTIVE_MODEL;
+        if (!modelName) {
+          try {
+            const baseUrl = getOllamaBaseUrl();
+            const response = await fetch(`${baseUrl}/api/tags`, {
+              method: 'GET',
+              headers: getOllamaHeaders(),
+              signal: AbortSignal.timeout(5000)
+            });
+            if (response.ok) {
+              const data = await response.json();
+              if (data.models && data.models.length > 0) {
+                modelName = data.models[0].name;
+              }
+            }
+          } catch (err) {
+            console.log(`[readAndSendImage] Failed to fetch Ollama models: ${err.message}`);
+          }
+        }
+        if (!modelName) {
+          modelName = 'llama3';
+        }
+
+        const baseUrl = getOllamaBaseUrl();
+        const headers = getOllamaHeaders();
+
+        const response = await fetch(`${baseUrl}/api/chat`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: modelName,
+            messages: [
+              {
+                role: 'user',
+                content: prompt,
+                images: [base64Image]
+              }
+            ],
+            stream: false
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text().catch(() => '');
+          throw new Error(`Local LLM API error (status ${response.status}): ${errText}`);
+        }
+
+        const data = await response.json();
+        const contentResponse = data.message?.content || '';
+
+        return {
+          success: true,
+          message: 'Image analyzed successfully.',
+          response: contentResponse
+        };
+      } catch (error) {
         return { success: false, error: error.message };
       }
     }

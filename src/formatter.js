@@ -152,8 +152,12 @@ function stripTerminalResponses(chunk) {
   str = str.replace(/\u001b\[>\d+(?:;\d+)*c/g, '');
 
   // Pattern 4: Fragment-resistant patterns for split stream chunks
-  str = str.replace(/rgb:[0-9a-fA-F/]+/gi, '');
-  str = str.replace(/(?:[0-9a-fA-F]{1,4}\/)+[0-9a-fA-F]{1,4}/gi, '');
+  str = str.replace(/\x1b\](?:10|11|4);?/g, '');
+  str = str.replace(/\u001b\](?:10|11|4);?/g, '');
+  // Match rgb: prefix and any hex digits/slashes first to prevent split fragments like rgb: remaining
+  str = str.replace(/rgb:[0-9a-fA-F/]*/gi, '');
+  str = str.replace(/\/?(?:[0-9a-fA-F]{1,4}\/)*[0-9a-fA-F]{1,4}(?:\x07|\x1b\\)/gi, '');
+  str = str.replace(/\/?(?:[0-9a-fA-F]{1,4}\/)+[0-9a-fA-F]{1,4}/gi, '');
   str = str.replace(/\d+;rgb:/gi, '');
   str = str.replace(/\b10;\b/g, '');
   str = str.replace(/\b11;\b/g, '');
@@ -167,16 +171,78 @@ function stripTerminalResponses(chunk) {
   return str;
 }
 
-// 3. Intercept input stream (process.stdin) data events to strip any pre-existing or late-arriving terminal query responses
+let stdinBuffer = '';
+let flushTimeout = null;
+
+function hasPartialTerminalResponse(str) {
+  // Check for partial OSC: ESC ] followed by 10, 11, or 4, and optional characters but no terminator
+  if (/\x1b\](?:10|11|4);[^\x07\x1b]*$/i.test(str) || /\u001b\](?:10|11|4);[^\x07\u001b]*$/i.test(str)) {
+    return true;
+  }
+  // Check for ESC ] or ESC ]11 etc without semicolon yet
+  if (/\x1b\](?:10|11|4)?$/i.test(str) || /\u001b\](?:10|11|4)?$/i.test(str)) {
+    return true;
+  }
+  // Check for partial CPR or DA: ESC [ followed by digits/semicolons/question/greater-than, but no trailing letter
+  if (/\x1b\[[?0-9;>]*$/i.test(str) || /\u001b\[[?0-9;>]*$/i.test(str)) {
+    return true;
+  }
+  // Check for bare ESC/u001b at the end of the string
+  if (str.endsWith('\x1b') || str.endsWith('\u001b')) {
+    return true;
+  }
+  // Check for partial rgb: fragment at the end of the string (e.g. ends with "rgb", "rg", "r" after ESC])
+  if (/rgb:[0-9a-fA-F/]*$/i.test(str) || /rgb?$/i.test(str)) {
+    if (str.includes('\x1b') || str.includes('\u001b')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function flushStdin(originalEmit, emitter) {
+  if (flushTimeout) {
+    clearTimeout(flushTimeout);
+    flushTimeout = null;
+  }
+  if (stdinBuffer) {
+    const toEmit = stdinBuffer;
+    stdinBuffer = '';
+    const filtered = stripTerminalResponses(toEmit);
+    if (filtered !== '') {
+      originalEmit.call(emitter, 'data', Buffer.from(filtered, 'utf8'));
+    }
+  }
+}
+
+// 3. Intercept input stream (process.stdin) data events with stateful chunk buffering
 if (typeof process !== 'undefined' && process.stdin && typeof process.stdin.emit === 'function') {
   const originalEmit = process.stdin.emit;
   process.stdin.emit = function(event, ...args) {
     if (event === 'data' && args[0]) {
-      const filtered = stripTerminalResponses(args[0]);
-      if (filtered === '' || (Buffer.isBuffer(filtered) && filtered.length === 0)) {
-        return true; // Discard event completely
+      const chunkStr = Buffer.isBuffer(args[0]) ? args[0].toString('utf8') : String(args[0]);
+      stdinBuffer += chunkStr;
+
+      if (flushTimeout) {
+        clearTimeout(flushTimeout);
+        flushTimeout = null;
       }
-      args[0] = filtered;
+
+      if (hasPartialTerminalResponse(stdinBuffer)) {
+        // Set a short timer to wait for more chunks
+        flushTimeout = setTimeout(() => {
+          flushStdin(originalEmit, process.stdin);
+        }, 30);
+        return true; // Intercepted for now
+      } else {
+        flushStdin(originalEmit, process.stdin);
+        return true;
+      }
+    }
+
+    // For other events (end, close, error, SIGINT), flush stdin buffer first to preserve order
+    if (stdinBuffer) {
+      flushStdin(originalEmit, process.stdin);
     }
     return originalEmit.apply(this, [event, ...args]);
   };
@@ -456,10 +522,20 @@ export function formatJsonAsTable(obj) {
       valStr = String(val);
     }
     const labelLen = key.length;
-    const valueLen = valStr.length;
     if (labelLen > maxLabelWidth) maxLabelWidth = labelLen;
-    if (valueLen > maxValueWidth) maxValueWidth = valueLen;
-    return { label: key, value: valStr };
+
+    let lines = valStr.split(/\r?\n/);
+    if (lines.length > 1 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+
+    for (const line of lines) {
+      if (line.length > maxValueWidth) {
+        maxValueWidth = line.length;
+      }
+    }
+
+    return { label: key, lines };
   });
 
   if (maxLabelWidth < 10) maxLabelWidth = 10;
@@ -475,15 +551,24 @@ export function formatJsonAsTable(obj) {
   outputLines.push(topBorder);
 
   for (const item of settings) {
-    let displayValue = item.value;
-    if (displayValue.length > cappedValueWidth) {
-      displayValue = displayValue.slice(0, cappedValueWidth - 3) + '...';
-    }
     const paddedLabel = item.label.padEnd(maxLabelWidth);
-    const paddedValue = displayValue.padEnd(cappedValueWidth);
     const coloredLabel = pc.bold(paddedLabel);
-    const coloredValue = pc.magenta(paddedValue);
-    outputLines.push(pc.bold(pc.cyan('│ ')) + coloredLabel + pc.bold(pc.cyan(' │ ')) + coloredValue + pc.bold(pc.cyan(' │')));
+    const emptyLabel = ' '.repeat(maxLabelWidth);
+
+    for (let i = 0; i < item.lines.length; i++) {
+      let displayValue = item.lines[i];
+      if (displayValue.length > cappedValueWidth) {
+        displayValue = displayValue.slice(0, cappedValueWidth - 3) + '...';
+      }
+      const paddedValue = displayValue.padEnd(cappedValueWidth);
+      const coloredValue = pc.magenta(paddedValue);
+
+      if (i === 0) {
+        outputLines.push(pc.bold(pc.cyan('│ ')) + coloredLabel + pc.bold(pc.cyan(' │ ')) + coloredValue + pc.bold(pc.cyan(' │')));
+      } else {
+        outputLines.push(pc.bold(pc.cyan('│ ')) + emptyLabel + pc.bold(pc.cyan(' │ ')) + coloredValue + pc.bold(pc.cyan(' │')));
+      }
+    }
   }
   outputLines.push(bottomBorder);
 

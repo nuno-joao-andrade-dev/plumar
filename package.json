@@ -14,12 +14,14 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "charsm": "^0.2.0",
     "jimp": "^1.6.1",
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",
     "picocolors": "^1.1.1",
     "zod": "^4.4.3"
+  },
+  "optionalDependencies": {
+    "charsm": "^0.2.0"
   },
   "devDependencies": {
     "@google/adk": "^1.2.0",

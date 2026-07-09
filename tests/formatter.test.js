@@ -30,6 +30,33 @@ test('Formatter JSON Output Suite', async (t) => {
     assert.ok(result.includes('┌')); // Box drawing border
   });
 
+  await t.test('formatChatResponse: should format JSON object with multi-line string values elegantly', () => {
+    const jsonStr = `{"success": true, "stdout": "Hello, World!\\n", "stderr": "line 1\\nline 2"}`;
+    const result = formatChatResponse(jsonStr);
+    assert.ok(result.includes('success'));
+    assert.ok(result.includes('stdout'));
+    assert.ok(result.includes('Hello, World!'));
+    assert.ok(result.includes('line 1'));
+    assert.ok(result.includes('line 2'));
+    assert.ok(result.includes('┌'));
+    
+    // There should NOT be an empty padded line for the trailing newline of Hello, World!
+    // Since we split and popped, Hello, World! should be printed as a single line, 
+    // and there should not be any line below it starting with a blank label and trailing spaces.
+    const lines = result.split('\n');
+    const stdoutHeaderLine = lines.find(line => line.includes('stdout'));
+    assert.ok(stdoutHeaderLine, 'stdout row should exist');
+    
+    // Ensure both line 1 and line 2 of stderr are present on separate rows
+    const stderrLine1 = lines.find(line => line.includes('line 1'));
+    const stderrLine2 = lines.find(line => line.includes('line 2'));
+    assert.ok(stderrLine1, 'stderr line 1 should exist');
+    assert.ok(stderrLine2, 'stderr line 2 should exist');
+    
+    // Check that the second line of stderr does NOT duplicate the label/key "stderr"
+    assert.ok(!stderrLine2.includes('stderr'), 'second line of multi-line value should not duplicate key');
+  });
+
   await t.test('formatChatResponse: should format markdown enclosed JSON block as table', () => {
     const markdownStr = `\`\`\`json
 [
@@ -160,6 +187,47 @@ Please review it carefully!`;
       assert.ok(fullLogStr.includes('Tools: Native'));
     } finally {
       console.log = originalLog;
+    }
+  });
+
+  await t.test('process.stdin interceptor: should correctly reconstruct split terminal responses and strip them, while preserving normal input', async () => {
+    const received = [];
+    const onData = (chunk) => {
+      received.push(chunk.toString('utf8'));
+    };
+    process.stdin.on('data', onData);
+
+    try {
+      // 1. Emit a normal chunk - should be received immediately
+      process.stdin.emit('data', Buffer.from('Hi', 'utf8'));
+      assert.deepEqual(received, ['Hi']);
+      received.length = 0;
+
+      // 2. Emit a split OSC response chunk 1 - should be buffered (not received yet)
+      process.stdin.emit('data', Buffer.from('\x1b]11;r', 'utf8'));
+      assert.deepEqual(received, []);
+
+      // 3. Emit split OSC response chunk 2 - should complete the query response and be completely stripped (not received)
+      process.stdin.emit('data', Buffer.from('gb:0000/0000/0000\x07', 'utf8'));
+      assert.deepEqual(received, []);
+
+      // 4. Emit another normal chunk - should be received immediately
+      process.stdin.emit('data', Buffer.from('World', 'utf8'));
+      assert.deepEqual(received, ['World']);
+      received.length = 0;
+
+      // 5. Emit a partial OSC response and wait for timeout to flush
+      process.stdin.emit('data', Buffer.from('\x1b]11;abc', 'utf8'));
+      assert.deepEqual(received, []);
+
+      // Wait 50ms for the flush timeout
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      // Since it's flush-timed out, we expect the filtered version to be emitted.
+      // "\x1b]11;abc" has "\x1b]11;" stripped by stripTerminalResponses, leaving "abc".
+      assert.deepEqual(received, ['abc']);
+    } finally {
+      process.stdin.removeListener('data', onData);
     }
   });
 });

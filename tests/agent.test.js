@@ -745,10 +745,10 @@ test('Agent Integration Suite (Real-World Use Cases)', async (t) => {
       assert.ok(systemMsgGemma.content.includes('NATIVE MODEL IMAGE GENERATION'));
       assert.ok(!systemMsgGemma.content.includes('TEXT-ONLY LIMITATION'));
       
-      // Since generateImage is filtered out for all models, it should NOT be present in gemma4's payload either
+      // Since generateImage is exposed directly, it should be present in gemma4's payload
       const gemmaTools = capturedPayload.tools || [];
       const hasGenerateImageGemma = gemmaTools.some(t => t.function && t.function.name === 'generateImage');
-      assert.strictEqual(hasGenerateImageGemma, false);
+      assert.strictEqual(hasGenerateImageGemma, true);
 
       // But base64Convert tool should be present for gemma4
       const hasBase64Gemma = gemmaTools.some(t => t.function && t.function.name === 'base64Convert');
@@ -761,13 +761,13 @@ test('Agent Integration Suite (Real-World Use Cases)', async (t) => {
       assert.ok(capturedPayload);
       const systemMsgLlama = capturedPayload.messages.find(m => m.role === 'system');
       assert.ok(systemMsgLlama);
-      assert.ok(systemMsgLlama.content.includes('TEXT-ONLY LIMITATION'));
+      assert.ok(systemMsgLlama.content.includes('LOCAL TOOL IMAGE GENERATION'));
       assert.ok(!systemMsgLlama.content.includes('NATIVE MODEL IMAGE GENERATION'));
 
-      // Since llama3 is text-only, generateImage tool should NOT be present in payload
+      // Since generateImage is exposed directly, it should be present in llama3's payload
       const llamaTools = capturedPayload.tools || [];
       const hasGenerateImageLlama = llamaTools.some(t => t.function && t.function.name === 'generateImage');
-      assert.strictEqual(hasGenerateImageLlama, false);
+      assert.strictEqual(hasGenerateImageLlama, true);
 
     } finally {
       globalThis.fetch = previousFetch;

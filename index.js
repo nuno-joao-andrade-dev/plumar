@@ -387,8 +387,12 @@ async function main() {
       answer = answer.replace(/\u001b\[>\d+(?:;\d+)*c/g, '');
 
       // 2. Fragment-resistant patterns
-      answer = answer.replace(/rgb:[0-9a-fA-F/]+/gi, '');
-      answer = answer.replace(/(?:[0-9a-fA-F]{1,4}\/)+[0-9a-fA-F]{1,4}/gi, '');
+      answer = answer.replace(/\x1b\](?:10|11|4);?/g, '');
+      answer = answer.replace(/\u001b\](?:10|11|4);?/g, '');
+      // Match rgb: prefix and any hex digits/slashes first to prevent split fragments like rgb: remaining
+      answer = answer.replace(/rgb:[0-9a-fA-F/]*/gi, '');
+      answer = answer.replace(/\/?(?:[0-9a-fA-F]{1,4}\/)*[0-9a-fA-F]{1,4}(?:\x07|\x1b\\)/gi, '');
+      answer = answer.replace(/\/?(?:[0-9a-fA-F]{1,4}\/)+[0-9a-fA-F]{1,4}/gi, '');
       answer = answer.replace(/\d+;rgb:/gi, '');
       answer = answer.replace(/\b10;\b/g, '');
       answer = answer.replace(/\b11;\b/g, '');
