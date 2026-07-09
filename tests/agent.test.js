@@ -405,6 +405,38 @@ test('Agent Integration Suite (Real-World Use Cases)', async (t) => {
     assert.ok(res.text.includes('Found files in the workspace.'));
   });
 
+  await t.test('Use Case 9.6: Text-based tool call fallback Qwen tag style', async () => {
+    const sessionId = 'test-usecase-9-6-qwen-tags';
+
+    // 1. Tool call with <tool_call>JSON</tool_call> (Qwen style)
+    mockFetchResponses.push({
+      json: {
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: 'Let me do calculator. <tool_call>{"name": "calculator", "arguments": {"expression": "10 + 10"}}</tool_call> Nice.'
+          }
+        }]
+      }
+    });
+
+    // 2. Response after tool executes
+    mockFetchResponses.push({
+      json: {
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: 'Result is 20.'
+          }
+        }]
+      }
+    });
+
+    const res = await runAgentTurn(sessionId, 'calculate 10 + 10', 'qwen:latest', 'balanced');
+    assert.ok(res.text.includes('calculator'));
+    assert.ok(res.text.includes('Result is 20.'));
+  });
+
   await t.test('Use Case 10: Verbose JSON logging control', async () => {
     const originalValue = isVerboseJsonEnabled();
     try {

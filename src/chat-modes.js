@@ -186,11 +186,42 @@ export function initChatModes() {
   if (fs.existsSync(settingsPath)) {
     try {
       const content = fs.readFileSync(settingsPath, 'utf8');
-      const parsed = JSON.parse(content);
-      if (parsed) {
-        const loadedModes = parsed.chatModes || parsed.CHAT_MODES || parsed;
-        if (typeof loadedModes === 'object' && !Array.isArray(loadedModes)) {
-          for (const [key, mode] of Object.entries(loadedModes)) {
+      const parsed = JSON.parse(content) || {};
+      let hasLoadedModes = false;
+      const loadedModes = parsed.chatModes || parsed.CHAT_MODES;
+      if (typeof loadedModes === 'object' && !Array.isArray(loadedModes)) {
+        for (const [key, mode] of Object.entries(loadedModes)) {
+          if (mode && typeof mode === 'object' && mode.name && mode.systemPrompt) {
+            const parsedMode = {
+              name: mode.name,
+              emoji: mode.emoji || '',
+              description: mode.description || '',
+              systemPrompt: mode.systemPrompt
+            };
+
+            const paramKeys = [
+              'temperature', 'top_p', 'top_k', 'min_p', 'seed',
+              'num_ctx', 'num_predict', 'stop', 'repeat_penalty', 'repeat_last_n'
+            ];
+            for (const pk of paramKeys) {
+              if (mode[pk] !== undefined && mode[pk] !== null) {
+                const casted = castParameter(pk, mode[pk]);
+                if (casted !== null) {
+                  parsedMode[pk] = casted;
+                }
+              }
+            }
+            CHAT_MODES[key] = parsedMode;
+            hasLoadedModes = true;
+          }
+        }
+      }
+
+      // Fallback if the file didn't have a structured chatModes block but had flat keys
+      if (!hasLoadedModes) {
+        const potentialModes = parsed.balanced || parsed.code ? parsed : null;
+        if (potentialModes && typeof potentialModes === 'object') {
+          for (const [key, mode] of Object.entries(potentialModes)) {
             if (mode && typeof mode === 'object' && mode.name && mode.systemPrompt) {
               const parsedMode = {
                 name: mode.name,
@@ -212,9 +243,17 @@ export function initChatModes() {
                 }
               }
               CHAT_MODES[key] = parsedMode;
+              hasLoadedModes = true;
             }
           }
         }
+      }
+
+      // If we didn't load any valid modes, write defaultChatModes back into the file
+      if (!hasLoadedModes) {
+        parsed.chatModes = defaultChatModes;
+        fs.writeFileSync(settingsPath, JSON.stringify(parsed, null, 2), 'utf8');
+        Object.assign(CHAT_MODES, defaultChatModes);
       }
     } catch (err) {
       console.error(`Error loading settings/chat-modes from ${settingsPath}:`, err.message);

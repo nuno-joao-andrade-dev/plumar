@@ -58,7 +58,7 @@ export function adkContentsToOllamaMessages(contents, systemInstruction) {
       
       messages.push({
         role: 'assistant',
-        content: textContent || null,
+        content: textContent || '',
         tool_calls: toolCalls.length > 0 ? toolCalls : undefined
       });
     } else if (hasFunctionResponse) {
@@ -196,6 +196,28 @@ export function detectAndParseTextToolCalls(text) {
     }
     foundCalls.push({ name, args, rawMatch: match[0] });
   }
+
+  // 1.2 Match Qwen-style <tool_call>{"name": "tool_name", "arguments": ...}</tool_call>
+  const qwenToolCallRegex = /<tool_call\s*>([\s\S]*?)<\/tool_call>/gi;
+  while ((match = qwenToolCallRegex.exec(text)) !== null) {
+    const rawContent = match[1].trim();
+    try {
+      const parsed = JSON.parse(rawContent);
+      if (parsed && typeof parsed === 'object') {
+        const toolName = parsed.name || parsed.tool;
+        if (toolName && typeof toolName === 'string') {
+          let args = parsed.arguments || parsed.args || parsed.parameters || {};
+          if (typeof args !== 'object') {
+            args = {};
+          }
+          foundCalls.push({ name: toolName, args, rawMatch: match[0] });
+        }
+      }
+    } catch (e) {
+      // Ignore invalid JSON parsing in Qwen tag content
+    }
+  }
+
 
   // 2. Match <call_tool_name>arguments</call_tool_name>
   const callTagRegex = /<call_([a-zA-Z0-9_-]+)>([\s\S]*?)<\/call_\1>/gi;
@@ -432,6 +454,7 @@ export class Ollama extends BaseLlm {
         model: this.model,
         messages: messages, // Standard OpenAI format
         tools: ollamaTools,
+        stream: false,
         temperature: payloadOptions.temperature ?? llmRequest.config?.temperature ?? 0.7
       };
     } else {
@@ -493,7 +516,11 @@ export class Ollama extends BaseLlm {
         const isToolErr = errText.toLowerCase().includes('support tool') || 
                           errText.toLowerCase().includes('support tools') || 
                           errText.toLowerCase().includes('not support') || 
-                          errText.toLowerCase().includes('unsupported field: tools');
+                          errText.toLowerCase().includes('unsupported field: tools') ||
+                          errText.toLowerCase().includes('unsupported parameter') ||
+                          errText.toLowerCase().includes('parameter') ||
+                          errText.toLowerCase().includes('bad request') ||
+                          provider === 'lmstudio';
         if (isToolErr) {
           fallbackTextMode = true;
         } else {
@@ -509,7 +536,9 @@ export class Ollama extends BaseLlm {
                             data.error.toLowerCase().includes('support tool') || 
                             data.error.toLowerCase().includes('support tools') || 
                             data.error.toLowerCase().includes('not support') || 
-                            data.error.toLowerCase().includes('unsupported field: tools')
+                            data.error.toLowerCase().includes('unsupported field: tools') ||
+                            data.error.toLowerCase().includes('unsupported parameter') ||
+                            provider === 'lmstudio'
                           );
           if (isToolErr) {
             fallbackTextMode = true;
@@ -527,7 +556,9 @@ export class Ollama extends BaseLlm {
                         err.message.toLowerCase().includes('support tool') || 
                         err.message.toLowerCase().includes('support tools') || 
                         err.message.toLowerCase().includes('not support') || 
-                        err.message.toLowerCase().includes('unsupported field: tools')
+                        err.message.toLowerCase().includes('unsupported field: tools') ||
+                        err.message.toLowerCase().includes('unsupported parameter') ||
+                        provider === 'lmstudio'
                       );
       if (isToolErr) {
         fallbackTextMode = true;

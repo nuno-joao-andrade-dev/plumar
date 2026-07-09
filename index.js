@@ -217,6 +217,219 @@ export function displaySettingsTable() {
 }
 
 
+async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel = '') {
+  let selectedModel = null;
+  rl.line = '';
+  rl.cursor = 0;
+  while (!selectedModel) {
+    console.log(pc.dim(`Querying Ollama at ${pc.bold(getOllamaHost())} and LM Studio at ${pc.bold(getLmStudioHost())} for models...\n`));
+
+    let ollamaModels = [];
+    let lmStudioModels = [];
+    let ollamaError = null;
+    let lmStudioError = null;
+
+    const ollamaPromise = (async () => {
+      const oldProvider = getLlmProvider();
+      try {
+        setLlmProvider('ollama');
+        ollamaModels = await fetchOllamaModels(true);
+      } catch (err) {
+        ollamaError = err.message;
+      } finally {
+        setLlmProvider(oldProvider);
+      }
+    })();
+
+    const lmStudioPromise = (async () => {
+      const oldProvider = getLlmProvider();
+      try {
+        setLlmProvider('lmstudio');
+        lmStudioModels = await fetchOllamaModels(true);
+      } catch (err) {
+        lmStudioError = err.message;
+      } finally {
+        setLlmProvider(oldProvider);
+      }
+    })();
+
+    await Promise.all([ollamaPromise, lmStudioPromise]);
+
+    console.log(pc.bold(pc.yellow('\n🤖 Available Models:')));
+    console.log(pc.bold(pc.cyan('─'.repeat(60))));
+
+    let listIndex = 1;
+    const modelLookup = []; // Maps listIndex to selection item
+
+    if (ollamaModels.length > 0) {
+      console.log(pc.bold(pc.magenta(' Ollama:')));
+      ollamaModels.forEach(m => {
+        const isSelected = m.name === currentActiveModel && getLlmProvider() === 'ollama';
+        const bullet = isSelected ? pc.bold(pc.green('❯')) : ' ';
+        const num = pc.cyan(` [${listIndex}]`);
+        const name = isSelected ? pc.bold(pc.green(m.name)) : m.name;
+        
+        let extraInfo = '';
+        const charParts = [];
+        if (m.details?.family) charParts.push(m.details.family);
+        if (m.details?.parameter_size) charParts.push(m.details.parameter_size);
+        if (m.size) {
+          const gb = m.size / (1024 * 1024 * 1024);
+          charParts.push(`${gb.toFixed(1)} GB`);
+        }
+        if (charParts.length > 0) {
+          extraInfo = pc.dim(` (${charParts.join(', ')})`);
+        }
+
+        console.log(`  ${bullet} ${num} ${name}${extraInfo}`);
+        modelLookup.push({ name: m.name, provider: 'ollama' });
+        listIndex++;
+      });
+    } else {
+      console.log(pc.bold(pc.magenta(' Ollama:')) + pc.dim(' (No models found or server offline)'));
+    }
+
+    console.log();
+
+    if (lmStudioModels.length > 0) {
+      console.log(pc.bold(pc.magenta(' LM Studio:')));
+      lmStudioModels.forEach(m => {
+        const isSelected = m.name === currentActiveModel && getLlmProvider() === 'lmstudio';
+        const bullet = isSelected ? pc.bold(pc.green('❯')) : ' ';
+        const num = pc.cyan(` [${listIndex}]`);
+        const name = isSelected ? pc.bold(pc.green(m.name)) : m.name;
+        
+        console.log(`  ${bullet} ${num} ${name}`);
+        modelLookup.push({ name: m.name, provider: 'lmstudio' });
+        listIndex++;
+      });
+    } else {
+      console.log(pc.bold(pc.magenta(' LM Studio:')) + pc.dim(' (No models found or server offline)'));
+    }
+
+    console.log(pc.bold(pc.cyan('─'.repeat(60))));
+    console.log(pc.bold(pc.yellow(' Additional Options:')));
+    console.log(`  ${pc.cyan(' [C]')} ${pc.bold('Configure')} Endpoints & Authentication`);
+    console.log(`  ${pc.cyan(' [M]')} ${pc.bold('Manual')} model name override`);
+    const exitLabel = isStartup ? 'Exit Plumar' : 'Go back without changing model';
+    console.log(`  ${pc.cyan(' [E]')} ${pc.bold(exitLabel)}\n`);
+
+    rl.line = '';
+    rl.cursor = 0;
+    const answer = await rl.question(pc.green(pc.bold('Choose model number or option letter (C/M/E) › ')));
+    const trimmed = answer.trim().toLowerCase();
+
+    if (trimmed === 'c') {
+      let back = false;
+      while (!back) {
+        console.clear();
+        console.log(pc.bold(pc.yellow('\n⚙️  Configure Endpoints & Authentication:')));
+        console.log(pc.bold(pc.cyan('─'.repeat(60))));
+        console.log(`  ${pc.cyan('[1]')} Configure Ollama Endpoint (current: ${pc.bold(getOllamaHost())})`);
+        console.log(`  ${pc.cyan('[2]')} Configure Ollama Authentication Header/Token (current: ${pc.bold(getOllamaAuth() ? '******' : 'None')})`);
+        console.log(`  ${pc.cyan('[3]')} Configure LM Studio Endpoint (current: ${pc.bold(getLmStudioHost())})`);
+        console.log(`  ${pc.cyan('[4]')} Configure LM Studio Authentication Header/Token (current: ${pc.bold(getLmStudioAuth() ? '******' : 'None')})`);
+        console.log(`  ${pc.cyan('[5]')} Save & Go Back`);
+        console.log(pc.bold(pc.cyan('─'.repeat(60))));
+
+        const configChoice = await rl.question(pc.green(pc.bold('Choose option (1-5) › ')));
+        const trimmedChoice = configChoice.trim();
+
+        if (trimmedChoice === '1') {
+          const newUrl = await rl.question(pc.cyan(`Enter Ollama Server URL (press [Enter] to keep current: ${getOllamaHost()}) › `));
+          if (newUrl.trim()) {
+            setOllamaHost(newUrl.trim());
+            console.log(pc.green(`✔ Ollama Host successfully updated to: ${pc.bold(getOllamaHost())}`));
+            await new Promise(r => setTimeout(r, 800));
+          }
+        } else if (trimmedChoice === '2') {
+          const newAuth = await rl.question(pc.cyan(`Enter Ollama Authentication Header/Token (type "none" to clear) › `));
+          const tAuth = newAuth.trim();
+          if (tAuth) {
+            if (tAuth.toLowerCase() === 'none' || tAuth.toLowerCase() === 'clear') {
+              setOllamaAuth('');
+            } else {
+              setOllamaAuth(tAuth);
+            }
+            console.log(pc.green(`✔ Ollama Authentication successfully updated.`));
+            await new Promise(r => setTimeout(r, 800));
+          }
+        } else if (trimmedChoice === '3') {
+          const newUrl = await rl.question(pc.cyan(`Enter LM Studio Server URL (press [Enter] to keep current: ${getLmStudioHost()}) › `));
+          if (newUrl.trim()) {
+            setLmStudioHost(newUrl.trim());
+            console.log(pc.green(`✔ LM Studio Host successfully updated to: ${pc.bold(getLmStudioHost())}`));
+            await new Promise(r => setTimeout(r, 800));
+          }
+        } else if (trimmedChoice === '4') {
+          const newAuth = await rl.question(pc.cyan(`Enter LM Studio Authentication Header/Token (type "none" to clear) › `));
+          const tAuth = newAuth.trim();
+          if (tAuth) {
+            if (tAuth.toLowerCase() === 'none' || tAuth.toLowerCase() === 'clear') {
+              setLmStudioAuth('');
+            } else {
+              setLmStudioAuth(tAuth);
+            }
+            console.log(pc.green(`✔ LM Studio Authentication successfully updated.`));
+            await new Promise(r => setTimeout(r, 800));
+          }
+        } else if (trimmedChoice === '5') {
+          back = true;
+        }
+      }
+      console.clear();
+      console.log(pc.cyan('🔄 Refreshing models list...\n'));
+    } else if (trimmed === 'm') {
+      const manualName = await rl.question(pc.cyan('Enter model name manually › '));
+      if (manualName.trim()) {
+        selectedModel = manualName.trim();
+        const providerAnswer = await rl.question(pc.cyan(`Select LLM Provider for manual model (1: Ollama, 2: LM Studio, current: ${getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama'}) › `));
+        let chosenProvider = 'ollama';
+        if (providerAnswer.trim() === '2') {
+          chosenProvider = 'lmstudio';
+        }
+        setLlmProvider(chosenProvider);
+        console.log(pc.green(`✔ Configured with manual model name: ${pc.bold(selectedModel)}\n`));
+        return { selectedModel, provider: chosenProvider };
+      }
+    } else if (trimmed === 'e') {
+      if (isStartup) {
+        console.log(pc.magenta(pc.bold('\n👋 Goodbye! Thank you for using Plumar.')));
+        rl.close();
+        process.exit(0);
+      } else {
+        return null;
+      }
+    } else {
+      const choiceIndex = parseInt(trimmed, 10) - 1;
+      if (choiceIndex >= 0 && choiceIndex < modelLookup.length) {
+        const selected = modelLookup[choiceIndex];
+        setLlmProvider(selected.provider);
+        selectedModel = selected.name;
+        console.log(pc.green(`✔ Selected active provider: ${pc.bold(selected.provider === 'lmstudio' ? 'LM Studio' : 'Ollama')}`));
+        console.log(pc.green(`✔ Selected active model: ${pc.bold(selectedModel)}\n`));
+        await new Promise(r => setTimeout(r, 600));
+        return { selectedModel, provider: selected.provider };
+      } else {
+        const matched = modelLookup.find(item => item.name.toLowerCase() === trimmed);
+        if (matched) {
+          setLlmProvider(matched.provider);
+          selectedModel = matched.name;
+          console.log(pc.green(`✔ Selected active provider: ${pc.bold(matched.provider === 'lmstudio' ? 'LM Studio' : 'Ollama')}`));
+          console.log(pc.green(`✔ Selected active model: ${pc.bold(selectedModel)}\n`));
+          await new Promise(r => setTimeout(r, 600));
+          return { selectedModel, provider: matched.provider };
+        } else {
+          console.log(pc.red('❌ Invalid selection. Please enter a valid number or option letter.\n'));
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+    }
+  }
+  return { selectedModel, provider: getLlmProvider() };
+}
+
+
 async function main() {
   // Parse verbosity flags
   if (process.argv.includes('--verbose') || process.argv.includes('--verbose-json') || process.argv.includes('-v')) {
@@ -456,208 +669,8 @@ async function main() {
   console.log(pc.magenta(pc.bold('🤖 Starting Plumar (plumar-cli)...')));
   
   // 1. Interactive Model Selection on Startup
-  let selectedModel = null;
-  // Clear any garbage or buffered terminal color query responses (e.g. OSC 11) from background charsm/termenv init
-  rl.line = '';
-  rl.cursor = 0;
-  while (!selectedModel) {
-    console.log(pc.dim(`Querying Ollama at ${pc.bold(getOllamaHost())} and LM Studio at ${pc.bold(getLmStudioHost())} for models...\n`));
-
-    let ollamaModels = [];
-    let lmStudioModels = [];
-    let ollamaError = null;
-    let lmStudioError = null;
-
-    const ollamaPromise = (async () => {
-      const oldProvider = getLlmProvider();
-      try {
-        setLlmProvider('ollama');
-        ollamaModels = await fetchOllamaModels(true);
-      } catch (err) {
-        ollamaError = err.message;
-      } finally {
-        setLlmProvider(oldProvider);
-      }
-    })();
-
-    const lmStudioPromise = (async () => {
-      const oldProvider = getLlmProvider();
-      try {
-        setLlmProvider('lmstudio');
-        lmStudioModels = await fetchOllamaModels(true);
-      } catch (err) {
-        lmStudioError = err.message;
-      } finally {
-        setLlmProvider(oldProvider);
-      }
-    })();
-
-    await Promise.all([ollamaPromise, lmStudioPromise]);
-
-    console.log(pc.bold(pc.yellow('\n🤖 Available Models:')));
-    console.log(pc.bold(pc.cyan('─'.repeat(60))));
-
-    let listIndex = 1;
-    const modelLookup = []; // Maps listIndex to selection item
-
-    if (ollamaModels.length > 0) {
-      console.log(pc.bold(pc.magenta(' Ollama:')));
-      ollamaModels.forEach(m => {
-        const isSelected = m.name === activeModel && getLlmProvider() === 'ollama';
-        const bullet = isSelected ? pc.bold(pc.green('❯')) : ' ';
-        const num = pc.cyan(` [${listIndex}]`);
-        const name = isSelected ? pc.bold(pc.green(m.name)) : m.name;
-        
-        let extraInfo = '';
-        const charParts = [];
-        if (m.details?.family) charParts.push(m.details.family);
-        if (m.details?.parameter_size) charParts.push(m.details.parameter_size);
-        if (m.size) {
-          const gb = m.size / (1024 * 1024 * 1024);
-          charParts.push(`${gb.toFixed(1)} GB`);
-        }
-        if (charParts.length > 0) {
-          extraInfo = pc.dim(` (${charParts.join(', ')})`);
-        }
-
-        console.log(`  ${bullet} ${num} ${name}${extraInfo}`);
-        modelLookup.push({ name: m.name, provider: 'ollama' });
-        listIndex++;
-      });
-    } else {
-      console.log(pc.bold(pc.magenta(' Ollama:')) + pc.dim(' (No models found or server offline)'));
-    }
-
-    console.log();
-
-    if (lmStudioModels.length > 0) {
-      console.log(pc.bold(pc.magenta(' LM Studio:')));
-      lmStudioModels.forEach(m => {
-        const isSelected = m.name === activeModel && getLlmProvider() === 'lmstudio';
-        const bullet = isSelected ? pc.bold(pc.green('❯')) : ' ';
-        const num = pc.cyan(` [${listIndex}]`);
-        const name = isSelected ? pc.bold(pc.green(m.name)) : m.name;
-        
-        console.log(`  ${bullet} ${num} ${name}`);
-        modelLookup.push({ name: m.name, provider: 'lmstudio' });
-        listIndex++;
-      });
-    } else {
-      console.log(pc.bold(pc.magenta(' LM Studio:')) + pc.dim(' (No models found or server offline)'));
-    }
-
-    console.log(pc.bold(pc.cyan('─'.repeat(60))));
-    console.log(pc.bold(pc.yellow(' Additional Options:')));
-    console.log(`  ${pc.cyan(' [C]')} ${pc.bold('Configure')} Endpoints & Authentication`);
-    console.log(`  ${pc.cyan(' [M]')} ${pc.bold('Manual')} model name override`);
-    console.log(`  ${pc.cyan(' [E]')} ${pc.bold('Exit')} Plumar\n`);
-
-    rl.line = '';
-    rl.cursor = 0;
-    const answer = await rl.question(pc.green(pc.bold('Choose model number or option letter (C/M/E) › ')));
-    const trimmed = answer.trim().toLowerCase();
-
-    if (trimmed === 'c') {
-      let back = false;
-      while (!back) {
-        console.clear();
-        console.log(pc.bold(pc.yellow('\n⚙️  Configure Endpoints & Authentication:')));
-        console.log(pc.bold(pc.cyan('─'.repeat(60))));
-        console.log(`  ${pc.cyan('[1]')} Configure Ollama Endpoint (current: ${pc.bold(getOllamaHost())})`);
-        console.log(`  ${pc.cyan('[2]')} Configure Ollama Authentication Header/Token (current: ${pc.bold(getOllamaAuth() ? '******' : 'None')})`);
-        console.log(`  ${pc.cyan('[3]')} Configure LM Studio Endpoint (current: ${pc.bold(getLmStudioHost())})`);
-        console.log(`  ${pc.cyan('[4]')} Configure LM Studio Authentication Header/Token (current: ${pc.bold(getLmStudioAuth() ? '******' : 'None')})`);
-        console.log(`  ${pc.cyan('[5]')} Save & Go Back`);
-        console.log(pc.bold(pc.cyan('─'.repeat(60))));
-
-        const configChoice = await rl.question(pc.green(pc.bold('Choose option (1-5) › ')));
-        const trimmedChoice = configChoice.trim();
-
-        if (trimmedChoice === '1') {
-          const newUrl = await rl.question(pc.cyan(`Enter Ollama Server URL (press [Enter] to keep current: ${getOllamaHost()}) › `));
-          if (newUrl.trim()) {
-            setOllamaHost(newUrl.trim());
-            console.log(pc.green(`✔ Ollama Host successfully updated to: ${pc.bold(getOllamaHost())}`));
-            await new Promise(r => setTimeout(r, 800));
-          }
-        } else if (trimmedChoice === '2') {
-          const newAuth = await rl.question(pc.cyan(`Enter Ollama Authentication Header/Token (type "none" to clear) › `));
-          const tAuth = newAuth.trim();
-          if (tAuth) {
-            if (tAuth.toLowerCase() === 'none' || tAuth.toLowerCase() === 'clear') {
-              setOllamaAuth('');
-            } else {
-              setOllamaAuth(tAuth);
-            }
-            console.log(pc.green(`✔ Ollama Authentication successfully updated.`));
-            await new Promise(r => setTimeout(r, 800));
-          }
-        } else if (trimmedChoice === '3') {
-          const newUrl = await rl.question(pc.cyan(`Enter LM Studio Server URL (press [Enter] to keep current: ${getLmStudioHost()}) › `));
-          if (newUrl.trim()) {
-            setLmStudioHost(newUrl.trim());
-            console.log(pc.green(`✔ LM Studio Host successfully updated to: ${pc.bold(getLmStudioHost())}`));
-            await new Promise(r => setTimeout(r, 800));
-          }
-        } else if (trimmedChoice === '4') {
-          const newAuth = await rl.question(pc.cyan(`Enter LM Studio Authentication Header/Token (type "none" to clear) › `));
-          const tAuth = newAuth.trim();
-          if (tAuth) {
-            if (tAuth.toLowerCase() === 'none' || tAuth.toLowerCase() === 'clear') {
-              setLmStudioAuth('');
-            } else {
-              setLmStudioAuth(tAuth);
-            }
-            console.log(pc.green(`✔ LM Studio Authentication successfully updated.`));
-            await new Promise(r => setTimeout(r, 800));
-          }
-        } else if (trimmedChoice === '5') {
-          back = true;
-        }
-      }
-      console.clear();
-      console.log(pc.cyan('🔄 Refreshing models list...\n'));
-    } else if (trimmed === 'm') {
-      const manualName = await rl.question(pc.cyan('Enter model name manually › '));
-      if (manualName.trim()) {
-        selectedModel = manualName.trim();
-        const providerAnswer = await rl.question(pc.cyan(`Select LLM Provider for manual model (1: Ollama, 2: LM Studio, current: ${getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama'}) › `));
-        if (providerAnswer.trim() === '1') {
-          setLlmProvider('ollama');
-        } else if (providerAnswer.trim() === '2') {
-          setLlmProvider('lmstudio');
-        }
-        console.log(pc.green(`✔ Configured with manual model name: ${pc.bold(selectedModel)}\n`));
-      }
-    } else if (trimmed === 'e') {
-      console.log(pc.magenta(pc.bold('\n👋 Goodbye! Thank you for using Plumar.')));
-      rl.close();
-      process.exit(0);
-    } else {
-      const choiceIndex = parseInt(trimmed, 10) - 1;
-      if (choiceIndex >= 0 && choiceIndex < modelLookup.length) {
-        const selected = modelLookup[choiceIndex];
-        setLlmProvider(selected.provider);
-        selectedModel = selected.name;
-        console.log(pc.green(`✔ Selected active provider: ${pc.bold(selected.provider === 'lmstudio' ? 'LM Studio' : 'Ollama')}`));
-        console.log(pc.green(`✔ Selected active model: ${pc.bold(selectedModel)}\n`));
-        await new Promise(r => setTimeout(r, 600));
-      } else {
-        // Check if they typed a literal model name from the list
-        const matched = modelLookup.find(item => item.name.toLowerCase() === trimmed);
-        if (matched) {
-          setLlmProvider(matched.provider);
-          selectedModel = matched.name;
-          console.log(pc.green(`✔ Selected active provider: ${pc.bold(matched.provider === 'lmstudio' ? 'LM Studio' : 'Ollama')}`));
-          console.log(pc.green(`✔ Selected active model: ${pc.bold(selectedModel)}\n`));
-          await new Promise(r => setTimeout(r, 600));
-        } else {
-          console.log(pc.red('❌ Invalid selection. Please enter a valid number or option letter.\n'));
-          await new Promise(r => setTimeout(r, 1000));
-        }
-      }
-    }
-  }
+  const setupResult = await runModelSelectionFlow(rl, true, activeModel);
+  const selectedModel = setupResult ? setupResult.selectedModel : null;
 
   activeModel = selectedModel;
 
@@ -1548,67 +1561,34 @@ export const tool = new FunctionTool({
         
         else if (command === '/model') {
           try {
-            const models = await fetchOllamaModels(true);
-            if (models.length === 0) {
-              console.log(pc.yellow('⚠️  No models are currently installed in Ollama. Pull some first!\n'));
-            } else {
-              printModelSelection(models, activeModel);
-              const answer = await rl.question(pc.green(pc.bold(`Select model (1-${models.length}) › `)));
-              const index = parseInt(answer.trim(), 10) - 1;
-              
-              if (index >= 0 && index < models.length) {
-                activeModel = models[index].name;
+            const result = await runModelSelectionFlow(rl, false, activeModel);
+            if (result) {
+              activeModel = result.selectedModel;
 
-                // Prompt for temperature
-                let tempAnswer = await rl.question(pc.cyan('Enter temperature (0.0 - 1.0, or press [Enter] for default) › '));
-                tempAnswer = tempAnswer.trim();
-                if (tempAnswer) {
-                  const parsedTemp = parseFloat(tempAnswer);
-                  if (!isNaN(parsedTemp) && parsedTemp >= 0 && parsedTemp <= 1.0) {
-                    activeTemperature = parsedTemp;
-                  } else {
-                    console.log(pc.yellow(`⚠️  Invalid temperature. Using profile default.`));
-                    activeTemperature = null;
-                  }
+              // Prompt for temperature
+              let tempAnswer = await rl.question(pc.cyan('Enter temperature (0.0 - 1.0, or press [Enter] for default) › '));
+              tempAnswer = tempAnswer.trim();
+              if (tempAnswer) {
+                const parsedTemp = parseFloat(tempAnswer);
+                if (!isNaN(parsedTemp) && parsedTemp >= 0 && parsedTemp <= 1.0) {
+                  activeTemperature = parsedTemp;
                 } else {
+                  console.log(pc.yellow(`⚠️  Invalid temperature. Using profile default.`));
                   activeTemperature = null;
                 }
-
-                console.clear();
-                printBanner();
-                printStatus(activeModel, activeMode, CHAT_MODES[activeMode], activeTemperature);
-                console.log(pc.green(`✔ Model successfully changed to: ${pc.bold(activeModel)}\n`));
               } else {
-                const matched = models.find(m => m.name.toLowerCase() === answer.trim().toLowerCase());
-                if (matched) {
-                  activeModel = matched.name;
-
-                  // Prompt for temperature
-                  let tempAnswer = await rl.question(pc.cyan('Enter temperature (0.0 - 1.0, or press [Enter] for default) › '));
-                  tempAnswer = tempAnswer.trim();
-                  if (tempAnswer) {
-                    const parsedTemp = parseFloat(tempAnswer);
-                    if (!isNaN(parsedTemp) && parsedTemp >= 0 && parsedTemp <= 1.0) {
-                      activeTemperature = parsedTemp;
-                    } else {
-                      console.log(pc.yellow(`⚠️  Invalid temperature. Using profile default.`));
-                      activeTemperature = null;
-                    }
-                  } else {
-                    activeTemperature = null;
-                  }
-
-                  console.clear();
-                  printBanner();
-                  printStatus(activeModel, activeMode, CHAT_MODES[activeMode], activeTemperature);
-                  console.log(pc.green(`✔ Model successfully changed to: ${pc.bold(activeModel)}\n`));
-                } else {
-                  console.log(pc.red('❌ Switch cancelled: Invalid model choice.\n'));
-                }
+                activeTemperature = null;
               }
+
+              console.clear();
+              printBanner();
+              printStatus(activeModel, activeMode, CHAT_MODES[activeMode], activeTemperature);
+              console.log(pc.green(`✔ Model successfully changed to: ${pc.bold(activeModel)}\n`));
+            } else {
+              console.log(pc.yellow('⚠️  Model switch cancelled.\n'));
             }
           } catch (err) {
-            console.log(pc.red(`❌ Failed to fetch models: ${err.message}\n`));
+            console.log(pc.red(`❌ Failed to run model selection: ${err.message}\n`));
           }
           continue;
         } 
