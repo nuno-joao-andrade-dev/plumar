@@ -504,13 +504,45 @@ async function main() {
       console.log(pc.red(`❌ Connection failed: ${error.message}`));
       console.log(pc.yellow(`\n💡 Make sure Ollama is started and accessible at ${pc.bold(getOllamaBaseUrl())}`));
       
-      const option = await rl.question(
-        pc.cyan('Press [Enter] to try reconnecting, or type a model name manually › ')
-      );
+      console.log(pc.cyan('\nConnection Options:'));
+      console.log(` [1] ${pc.bold('Retry')} connection with current settings`);
+      console.log(` [2] ${pc.bold('Configure')} Ollama Server URL & Credentials`);
+      console.log(` [3] ${pc.bold('Manual')} model name override`);
+      console.log(` [4] ${pc.bold('Exit')} Plumar`);
       
-      if (option.trim()) {
-        selectedModel = option.trim();
-        console.log(pc.green(`✔ Configured with manual model name: ${pc.bold(selectedModel)}\n`));
+      const choice = await rl.question(pc.green('\nChoose option (1-4, or press [Enter] to retry) › '));
+      const trimmedChoice = choice.trim();
+      
+      if (trimmedChoice === '2') {
+        const currentUrl = getOllamaBaseUrl();
+        const currentAuth = getOllamaAuth();
+        
+        const newUrl = await rl.question(pc.cyan(`Enter Ollama Server URL (press [Enter] to keep current: ${currentUrl}) › `));
+        if (newUrl.trim()) {
+          setOllamaBaseUrl(newUrl.trim());
+        }
+        
+        const newAuth = await rl.question(pc.cyan(`Enter Optional Credentials / Auth Header (type "none" to clear, current: ${currentAuth || 'none'}) › `));
+        if (newAuth.trim()) {
+          if (newAuth.trim().toLowerCase() === 'none' || newAuth.trim().toLowerCase() === 'clear') {
+            setOllamaAuth('');
+          } else {
+            setOllamaAuth(newAuth.trim());
+          }
+        }
+        
+        console.clear();
+        console.log(pc.cyan('🔄 Retrying Ollama connection with updated settings...\n'));
+      } else if (trimmedChoice === '3') {
+        const manualName = await rl.question(pc.cyan('Enter model name manually › '));
+        if (manualName.trim()) {
+          selectedModel = manualName.trim();
+          console.log(pc.green(`✔ Configured with manual model name: ${pc.bold(selectedModel)}\n`));
+        }
+      } else if (trimmedChoice === '4') {
+        console.log(pc.magenta(pc.bold('\n👋 Goodbye! Thank you for using Plumar.')));
+        rl.close();
+        process.exit(0);
       } else {
         console.clear();
         console.log(pc.cyan('🔄 Retrying Ollama connection...\n'));
