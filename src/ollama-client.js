@@ -166,6 +166,59 @@ export function adkToolsToOllamaTools(adkTools) {
   return ollamaTools.length > 0 ? ollamaTools : undefined;
 }
 
+// Helper to parse standard and relaxed JS-object-like/JSON strings (e.g. from LMStudio)
+function parseRelaxedJson(str) {
+  str = str.trim();
+  if (!str) return {};
+
+  try {
+    return JSON.parse(str);
+  } catch (e) {
+    // Standard parsing failed; try to repair relaxed JSON
+  }
+
+  let repaired = str;
+  // Quote unquoted keys (letters, numbers, underscore, dash followed by a colon)
+  repaired = repaired.replace(/([{,]\s*)([a-zA-Z0-9_-]+)\s*:/g, '$1"$2":');
+  // Map single quotes around string literals to double quotes
+  repaired = repaired.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"');
+
+  try {
+    return JSON.parse(repaired);
+  } catch (e2) {
+    // Last-resort regex-based key-value extractor for basic arguments
+    const obj = {};
+    const kvRegex = /([a-zA-Z0-9_-]+)\s*:\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[0-9.]+|true|false|null)/g;
+    let kvMatch;
+    while ((kvMatch = kvRegex.exec(str)) !== null) {
+      const key = kvMatch[1];
+      let valStr = kvMatch[2].trim();
+      let val;
+      if (valStr.startsWith('"') && valStr.endsWith('"')) {
+        val = valStr.slice(1, -1);
+      } else if (valStr.startsWith("'") && valStr.endsWith("'")) {
+        val = valStr.slice(1, -1);
+      } else if (valStr === 'true') {
+        val = true;
+      } else if (valStr === 'false') {
+        val = false;
+      } else if (valStr === 'null') {
+        val = null;
+      } else {
+        val = Number(valStr);
+        if (isNaN(val)) {
+          val = valStr;
+        }
+      }
+      obj[key] = val;
+    }
+    if (Object.keys(obj).length > 0) {
+      return obj;
+    }
+    throw e2;
+  }
+}
+
 // Text-based fallback tool calls detector and parser
 export function detectAndParseTextToolCalls(text) {
   const foundCalls = [];
@@ -237,6 +290,20 @@ export function detectAndParseTextToolCalls(text) {
         }
       }
     } catch (e) {}
+    foundCalls.push({ name, args, rawMatch: match[0] });
+  }
+
+  // 2.6 Match LMStudio/asymmetric style <|tool_call>call:tool_name{arguments}<tool_call|>
+  const lmStudioRegex = /<\|tool_call\s*>\s*call:([a-zA-Z0-9_-]+)\s*([\s\S]*?)(?:<tool_call\|>|<\|tool_call\|>|<\/tool_call>)/gi;
+  while ((match = lmStudioRegex.exec(text)) !== null) {
+    const name = match[1].trim();
+    const rawArgs = match[2].trim();
+    let args = {};
+    try {
+      args = parseRelaxedJson(rawArgs);
+    } catch (e) {
+      // Ignore invalid parsing
+    }
     foundCalls.push({ name, args, rawMatch: match[0] });
   }
 

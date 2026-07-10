@@ -437,6 +437,38 @@ test('Agent Integration Suite (Real-World Use Cases)', async (t) => {
     assert.ok(res.text.includes('Result is 20.'));
   });
 
+  await t.test('Use Case 9.7: Text-based tool call fallback LM Studio style', async () => {
+    const sessionId = 'test-usecase-9-7-lmstudio-tags';
+
+    // 1. Tool call with <|tool_call>call:calculator{expression: "10 + 1222"}<tool_call|> (relaxed JSON)
+    mockFetchResponses.push({
+      json: {
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: 'Let me do calculator. <|tool_call>call:calculator{expression: "10 + 1222"}<tool_call|> Done.'
+          }
+        }]
+      }
+    });
+
+    // 2. Response after tool executes
+    mockFetchResponses.push({
+      json: {
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: 'Result is 1232.'
+          }
+        }]
+      }
+    });
+
+    const res = await runAgentTurn(sessionId, 'calculate 10 + 1222', 'qwen:latest', 'balanced');
+    assert.ok(res.text.includes('calculator'));
+    assert.ok(res.text.includes('Result is 1232.'));
+  });
+
   await t.test('Use Case 10: Verbose JSON logging control', async () => {
     const originalValue = isVerboseJsonEnabled();
     try {
