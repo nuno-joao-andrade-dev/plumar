@@ -121,7 +121,27 @@ export function adkContentsToOllamaMessages(contents, systemInstruction) {
     }
   }
   
-  return messages;
+  // Merge consecutive same-role messages (excluding 'tool' role) to guarantee strict alternating compliance
+  const mergedMessages = [];
+  for (const msg of messages) {
+    if (mergedMessages.length > 0 && mergedMessages[mergedMessages.length - 1].role === msg.role && msg.role !== 'tool') {
+      const lastMsg = mergedMessages[mergedMessages.length - 1];
+      
+      // Merge content
+      if (msg.content) {
+        lastMsg.content = ((lastMsg.content || '') + '\n\n' + msg.content).trim();
+      }
+      
+      // Combine tool_calls if present
+      if (msg.tool_calls) {
+        lastMsg.tool_calls = [...(lastMsg.tool_calls || []), ...msg.tool_calls];
+      }
+    } else {
+      mergedMessages.push({ ...msg });
+    }
+  }
+  
+  return mergedMessages;
 }
 
 // Helper to recursively normalize schema type strings to lowercase (e.g. OBJECT -> object)
@@ -331,6 +351,19 @@ export function detectAndParseTextToolCalls(text) {
     }
     foundCalls.push({ name, args, rawMatch: match[0] });
   }
+  // 2.7 Match history-style [Agent Tool Call: Executed "tool_name" with args: {arguments}]
+  const agentToolCallRegex = /\[Agent Tool Call:\s*(?:Executed\s*)?["']?([a-zA-Z0-9_-]+)["']?\s*(?:with\s+args:|args:)?\s*(\{[\s\S]*?\})\]/gi;
+  while ((match = agentToolCallRegex.exec(text)) !== null) {
+    const name = match[1].trim();
+    const rawArgs = match[2].trim();
+    let args = {};
+    try {
+      args = JSON.parse(rawArgs);
+    } catch (e) {
+      // Ignore invalid parsing
+    }
+    foundCalls.push({ name, args, rawMatch: match[0] });
+  }
 
   // 3. Match markdown JSON/raw code blocks
   const markdownRegex = /```(?:json)?\s*([\s\S]*?)```/gi;
@@ -536,7 +569,7 @@ export class Ollama extends BaseLlm {
       };
     }
     
-    const specLoader = startSpinner(`⏳ Inspecting specs for '${this.model}'...`);
+    const specLoader = startSpinner(`Inspecting specs for '${this.model}'...`);
 
     // Inspect model specifications proactively to check architecture and family
     const modelDetails = await getModelDetails(this.model);
@@ -564,7 +597,7 @@ export class Ollama extends BaseLlm {
     let data;
     let fallbackTextMode = false;
 
-    const chatLoader = startSpinner(`⚡ Awaiting ${providerName} response ('${this.model}')...`);
+    const chatLoader = startSpinner(`Awaiting ${providerName} response ('${this.model}')...`);
 
     try {
       try {
@@ -580,53 +613,50 @@ export class Ollama extends BaseLlm {
       
       if (!response.ok) {
         const errText = await response.text();
-        const isToolErr = errText.toLowerCase().includes('support tool') || 
-                          errText.toLowerCase().includes('support tools') || 
-                          errText.toLowerCase().includes('not support') || 
-                          errText.toLowerCase().includes('unsupported field: tools') ||
-                          errText.toLowerCase().includes('unsupported parameter') ||
-                          errText.toLowerCase().includes('parameter') ||
-                          errText.toLowerCase().includes('bad request') ||
-                          provider === 'lmstudio';
+        const errTextLower = errText.toLowerCase();
+        const hasToolKeyword = errTextLower.includes('tool') || errTextLower.includes('tools') || errTextLower.includes('tool_calls') || errTextLower.includes('messages') || errTextLower.includes('payload') || errTextLower.includes('structure') || errTextLower.includes('role');
+        const hasUnsupportedKeyword = errTextLower.includes('unsupported') || errTextLower.includes('not support') || errTextLower.includes('unknown') || errTextLower.includes('invalid') || errTextLower.includes('disabled') || errTextLower.includes('bad request') || errTextLower.includes('parameter') || errTextLower.includes('structure') || errTextLower.includes('payload');
+        const isToolErr = hasToolKeyword && hasUnsupportedKeyword;
         if (isToolErr) {
           fallbackTextMode = true;
         } else {
           if (errText.includes('mllama') || errText.includes('unknown model architecture')) {
-            throw new Error(`${providerName} API error: ${response.status} ${response.statusText} - ${errText}\n\n💡 This error occurs because your local ${providerName} server is outdated and does not support the 'mllama' vision architecture required by '${this.model}'. Please update to the latest version, or switch to a supported text model using the '/model' command (e.g. '/model qwen2.5:latest' or '/model llama3:latest').`);
+            throw new Error(`${providerName} API error: ${response.status} ${response.statusText} - ${errText}\n\nThis error occurs because your local ${providerName} server is outdated and does not support the 'mllama' vision architecture required by '${this.model}'. Please update to the latest version, or switch to a supported text model using the '/model' command (e.g. '/model qwen2.5:latest' or '/model llama3:latest').`);
           }
           throw new Error(`${providerName} API error: ${response.status} ${response.statusText} - ${errText}`);
         }
       } else {
         data = await response.json();
         if (data && data.error) {
-          const isToolErr = typeof data.error === 'string' && (
-                            data.error.toLowerCase().includes('support tool') || 
-                            data.error.toLowerCase().includes('support tools') || 
-                            data.error.toLowerCase().includes('not support') || 
-                            data.error.toLowerCase().includes('unsupported field: tools') ||
-                            data.error.toLowerCase().includes('unsupported parameter') ||
-                            provider === 'lmstudio'
-                          );
+          const errStr = typeof data.error === 'string' ? data.error.toLowerCase() : '';
+          const hasToolKeyword = errStr.includes('tool') || errStr.includes('tools') || errStr.includes('tool_calls') || errStr.includes('messages') || errStr.includes('payload') || errStr.includes('structure') || errStr.includes('role');
+          const hasUnsupportedKeyword = errStr.includes('unsupported') || errStr.includes('not support') || errStr.includes('unknown') || errStr.includes('invalid') || errStr.includes('disabled') || errStr.includes('parameter') || errStr.includes('structure') || errStr.includes('payload');
+          const isToolErr = errStr && hasToolKeyword && hasUnsupportedKeyword;
           if (isToolErr) {
             fallbackTextMode = true;
           } else {
             const errStr = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
             if (errStr.includes('mllama') || errStr.includes('unknown model architecture')) {
-              throw new Error(`${providerName} error: ${errStr}\n\n💡 This error occurs because your local ${providerName} server is outdated and does not support the 'mllama' vision architecture required by '${this.model}'. Please update to the latest version, or switch to a supported text model using the '/model' command (e.g. '/model qwen2.5:latest' or '/model llama3:latest').`);
+              throw new Error(`${providerName} error: ${errStr}\n\nThis error occurs because your local ${providerName} server is outdated and does not support the 'mllama' vision architecture required by '${this.model}'. Please update to the latest version, or switch to a supported text model using the '/model' command (e.g. '/model qwen2.5:latest' or '/model llama3:latest').`);
             }
             throw new Error(`${providerName} error: ${data.error}`);
+          }
+        } else if (provider === 'lmstudio' && requestPayload.tools) {
+          // Detect LM Studio silent-failure where passing the tools parameter returns a successful 200 OK response
+          // but with a completely empty assistant message and no native tool calls.
+          const msg = data.choices?.[0]?.message;
+          const content = msg?.content || '';
+          const toolCalls = msg?.tool_calls;
+          if (!content.trim() && (!toolCalls || toolCalls.length === 0)) {
+            fallbackTextMode = true;
           }
         }
       }
     } catch (err) {
-      const isToolErr = err.message && (
-                        err.message.toLowerCase().includes('support tool') || 
-                        err.message.toLowerCase().includes('support tools') || 
-                        err.message.toLowerCase().includes('not support') || 
-                        err.message.toLowerCase().includes('unsupported field: tools') ||
-                        err.message.toLowerCase().includes('unsupported parameter') ||
-                        provider === 'lmstudio'
-                      );
+      const errMsg = err.message ? err.message.toLowerCase() : '';
+      const hasToolKeyword = errMsg.includes('tool') || errMsg.includes('tools') || errMsg.includes('tool_calls') || errMsg.includes('messages') || errMsg.includes('payload') || errMsg.includes('structure') || errMsg.includes('role');
+      const hasUnsupportedKeyword = errMsg.includes('unsupported') || errMsg.includes('not support') || errMsg.includes('unknown') || errMsg.includes('invalid') || errMsg.includes('disabled') || errMsg.includes('parameter') || errMsg.includes('structure') || errMsg.includes('payload');
+      const isToolErr = errMsg && hasToolKeyword && hasUnsupportedKeyword;
       if (isToolErr) {
         fallbackTextMode = true;
       } else {
@@ -635,16 +665,105 @@ export class Ollama extends BaseLlm {
     }
 
     if (fallbackTextMode) {
-      console.log(`\n\x1b[2m[${providerName} ADK] Model '${this.model}' does not support tool-calling. Retrying in text-only mode...\x1b[0m`);
+      console.log(`\n\x1b[2m[${providerName} ADK] Model '${this.model}' retrying in text-only mode...\x1b[0m`);
       
       // Strip tools from payload
       delete requestPayload.tools;
+
+      // Clean up and normalize history messages for text-only mode to prevent schema errors or silent failures in LM Studio
+      if (requestPayload.messages && Array.isArray(requestPayload.messages)) {
+        const cleanedMessages = [];
+        
+        for (const msg of requestPayload.messages) {
+          const role = msg.role;
+          
+          if (role === 'assistant') {
+            const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
+            let content = msg.content || '';
+            
+            if (hasToolCalls) {
+              const callsDesc = msg.tool_calls.map(tc => {
+                const name = tc.function?.name || '';
+                let args = tc.function?.arguments || '{}';
+                if (typeof args === 'object' && args !== null) {
+                  args = JSON.stringify(args);
+                }
+                return `[Agent Tool Call: Executed "${name}" with args: ${args}]`;
+              }).join('\n');
+              
+              content = (content + '\n' + callsDesc).trim();
+            }
+            
+            cleanedMessages.push({
+              role: 'assistant',
+              content: content
+            });
+            
+          } else if (role === 'tool') {
+            const toolName = msg.name || 'tool';
+            let resultStr = msg.content || '';
+            if (typeof resultStr === 'object' && resultStr !== null) {
+              resultStr = JSON.stringify(resultStr, null, 2);
+            }
+            
+            cleanedMessages.push({
+              role: 'user',
+              content: `[System Tool Response for "${toolName}":\n${resultStr}]`,
+              isToolResponse: true
+            });
+            
+          } else {
+            cleanedMessages.push({
+              role: msg.role,
+              content: msg.content || ''
+            });
+          }
+        }
+        
+        // Merge consecutive same-role messages to guarantee strict role-alternation compliance
+        const mergedMessages = [];
+        for (const msg of cleanedMessages) {
+          if (mergedMessages.length > 0 && mergedMessages[mergedMessages.length - 1].role === msg.role) {
+            const lastMsg = mergedMessages[mergedMessages.length - 1];
+            if (msg.content) {
+              lastMsg.content = ((lastMsg.content || '') + '\n\n' + msg.content).trim();
+            }
+            if (msg.isToolResponse) {
+              lastMsg.isToolResponse = true;
+            }
+          } else {
+            mergedMessages.push({ ...msg });
+          }
+        }
+        
+        requestPayload.messages = mergedMessages;
+        
+        const textOnlyGuidance = `\n\nCRITICAL SYSTEM NOTICE: Native tool-calling is disabled for this model. You MUST invoke any tool calls by writing a standard JSON code block in your response. Example to write a hello.cpp file:\n\`\`\`json\n{\n  "name": "writeFile",\n  "arguments": {\n    "path": "hello.cpp",\n    "content": "#include <iostream>\\n\\nint main() {\\n    std::cout << \\"Hello, World!\\" << std::endl;\\n    return 0;\\n}"\n  }\n}\n\`\`\`\nDo NOT just explain your plan conversational style. You MUST output the JSON tool call block inside your markdown content.`;
+
+        // Check if there is a system message to append to
+        const systemMsg = requestPayload.messages.find(msg => msg.role === 'system');
+        if (systemMsg) {
+          systemMsg.content = (systemMsg.content || '') + textOnlyGuidance;
+        }
+
+        // Also append a strong, immediate reminder to the end of the last real user message (never to a tool response!)
+        const realUserMessages = requestPayload.messages.filter(msg => msg.role === 'user' && !msg.isToolResponse);
+        if (realUserMessages.length > 0) {
+          const lastUserMsg = realUserMessages[realUserMessages.length - 1];
+          lastUserMsg.content = (lastUserMsg.content || '') + `\n\n(Reminder: Please write the exact JSON code block to call your tools. Example: \`\`\`json\n{\n  "name": "writeFile",\n  "arguments": { "path": "hello.cpp", "content": "..." }\n}\n\`\`\`)`;
+        }
+
+        // Clean up temporary isToolResponse flags
+        for (const msg of requestPayload.messages) {
+          delete msg.isToolResponse;
+        }
+      }
       
       if (isVerboseJsonEnabled()) {
         console.log(`${providerName} Retry Request Payload (no tools):`, JSON.stringify(requestPayload, null, 2));
       }
 
-      const retryLoader = startSpinner(`⚡ Retrying in text-only mode ('${this.model}')...`);
+      const retryLoader = startSpinner(`Retrying in text-only mode ('${this.model}')...`);
 
       try {
         response = await fetch(requestUrl, {
@@ -871,6 +990,17 @@ export class Ollama extends BaseLlm {
       }
     }
     
+    const hasContent = text.trim() || 
+                       reasoningText || 
+                       thinkingMatch || 
+                       (nativeToolCalls && nativeToolCalls.length > 0) || 
+                       (textToolCalls && textToolCalls.length > 0) ||
+                       foundEmbeddedImage;
+                       
+    if (!hasContent) {
+      throw new Error(`The local model '${this.model}' returned a completely empty response. This often happens if the model's parameters (e.g. context limit 'num_ctx', temperature, or system prompt length) are misconfigured, or if the model's local context window was exceeded.`);
+    }
+    
     yield {
       content: {
         role: 'model',
@@ -892,7 +1022,7 @@ export class Ollama extends BaseLlm {
 export async function fetchOllamaModels(detailed = false) {
   const provider = getLlmProvider();
   const providerName = provider === 'lmstudio' ? 'LM Studio' : 'Ollama';
-  const modelsLoader = startSpinner(`⏳ Fetching installed models from ${providerName}...`);
+  const modelsLoader = startSpinner(`Fetching installed models from ${providerName}...`);
   try {
     const baseUrl = getOllamaBaseUrl();
     let response;

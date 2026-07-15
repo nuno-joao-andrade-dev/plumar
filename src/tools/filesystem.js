@@ -2,7 +2,7 @@ import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 import fs from 'fs/promises';
 import path from 'path';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { resolveSafePath, WORKSPACE_DIR } from './core-helper.js';
 
 export const filesystemTools = {
@@ -370,14 +370,106 @@ export const filesystemTools = {
       command: z.string().describe('The shell command to execute, e.g. "npm run test" or "node index.js"'),
     }),
     execute: async ({ command }) => {
+      const resolveCarriageReturnsLocal = (text) => {
+        if (typeof text !== 'string') return text;
+        const lines = text.split(/\r?\n/);
+        const resolvedLines = lines.map(line => {
+          if (line.includes('\r')) {
+            const parts = line.split('\r');
+            for (let i = parts.length - 1; i >= 0; i--) {
+              if (parts[i].trim()) {
+                return parts[i];
+              }
+            }
+            return parts[parts.length - 1];
+          }
+          return line;
+        });
+        return resolvedLines.join('\n');
+      };
+
       return new Promise((resolve) => {
-        exec(command, { cwd: WORKSPACE_DIR, timeout: 300000 }, (error, stdout, stderr) => {
+        const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/bash';
+        const args = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-c', command];
+        
+        const child = spawn(shell, args, { cwd: WORKSPACE_DIR });
+        
+        let stdout = '';
+        let stderr = '';
+        
+        const isTTY = process.stdout.isTTY;
+        let nonTtyStdoutBuffer = '';
+        let nonTtyStderrBuffer = '';
+        
+        child.stdout.on('data', (data) => {
+          const chunk = data.toString();
+          stdout += chunk;
+          
+          if (isTTY) {
+            process.stdout.write(chunk);
+          } else {
+            nonTtyStdoutBuffer += chunk;
+            const lines = nonTtyStdoutBuffer.split('\n');
+            nonTtyStdoutBuffer = lines.pop(); // Keep partial line
+            for (const line of lines) {
+              const cleanLine = resolveCarriageReturnsLocal(line);
+              process.stdout.write(cleanLine + '\n');
+            }
+          }
+        });
+        
+        child.stderr.on('data', (data) => {
+          const chunk = data.toString();
+          stderr += chunk;
+          
+          if (isTTY) {
+            process.stderr.write(chunk);
+          } else {
+            nonTtyStderrBuffer += chunk;
+            const lines = nonTtyStderrBuffer.split('\n');
+            nonTtyStderrBuffer = lines.pop(); // Keep partial line
+            for (const line of lines) {
+              const cleanLine = resolveCarriageReturnsLocal(line);
+              process.stderr.write(cleanLine + '\n');
+            }
+          }
+        });
+        
+        child.on('error', (err) => {
+          if (!isTTY) {
+            if (nonTtyStdoutBuffer) {
+              process.stdout.write(resolveCarriageReturnsLocal(nonTtyStdoutBuffer));
+            }
+            if (nonTtyStderrBuffer) {
+              process.stderr.write(resolveCarriageReturnsLocal(nonTtyStderrBuffer));
+            }
+          }
           resolve({
-            success: !error,
-            exitCode: error ? error.code : 0,
-            stdout: stdout ? stdout.toString() : '',
-            stderr: stderr ? stderr.toString() : '',
-            message: error ? `Command failed: ${error.message}` : 'Command executed successfully.'
+            success: false,
+            exitCode: -1,
+            stdout,
+            stderr: stderr + '\n' + err.message,
+            message: `Failed to start process: ${err.message}\n\nOutput:\n${stdout}\n\nError:\n${stderr}`
+          });
+        });
+        
+        child.on('close', (code) => {
+          if (!isTTY) {
+            if (nonTtyStdoutBuffer) {
+              process.stdout.write(resolveCarriageReturnsLocal(nonTtyStdoutBuffer) + '\n');
+            }
+            if (nonTtyStderrBuffer) {
+              process.stderr.write(resolveCarriageReturnsLocal(nonTtyStderrBuffer) + '\n');
+            }
+          }
+          resolve({
+            success: code === 0,
+            exitCode: code ?? 0,
+            stdout,
+            stderr,
+            message: code === 0 
+              ? `Command executed successfully.\n\nOutput:\n${stdout}` 
+              : `Command failed with exit code ${code}.\n\nOutput:\n${stdout}\n\nError:\n${stderr}`
           });
         });
       });

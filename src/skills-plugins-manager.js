@@ -141,7 +141,7 @@ export async function loadAllSkills() {
         };
       } catch (err) {
         // Skip invalid skill directories silently or log it
-        console.warn(`⚠️  Warning: Skipped loading skill in "${entry.name}": ${err.message}`);
+        console.warn(`Warning: Skipped loading skill in "${entry.name}": ${err.message}`);
       }
     }
   }
@@ -193,7 +193,7 @@ export async function loadAllPlugins() {
           };
         }
       } catch (err) {
-        console.warn(`⚠️  Warning: Skipped loading plugin "${entry.name}": ${err.message}`);
+        console.warn(`Warning: Skipped loading plugin "${entry.name}": ${err.message}`);
       }
     }
   }

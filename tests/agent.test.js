@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
-import { runAgentTurn, fetchOllamaModels, sessionService, getOllamaBaseUrl, setOllamaBaseUrl, registerMcpTools, tools, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, loadPolicyConfig, savePolicyConfig, getActivePolicyConfigFile, setActivePolicyConfigFile, getDefaultPolicy, getSessionTokens, resetSessionTokens } from '../src/agent.js';
+import { runAgentTurn, fetchOllamaModels, sessionService, getOllamaBaseUrl, setOllamaBaseUrl, registerMcpTools, tools, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, loadPolicyConfig, savePolicyConfig, getActivePolicyConfigFile, setActivePolicyConfigFile, getDefaultPolicy, getSessionTokens, resetSessionTokens, detectAndParseTextToolCalls } from '../src/agent.js';
 
 test('Agent Integration Suite (Real-World Use Cases)', async (t) => {
   const originalFetch = globalThis.fetch;
@@ -988,6 +988,15 @@ test('Agent Integration Suite (Real-World Use Cases)', async (t) => {
     } finally {
       globalThis.fetch = previousFetch;
     }
+  });
+
+  await t.test('Use Case 16: detectAndParseTextToolCalls should successfully match and parse history-style tool calls', () => {
+    const text = 'Balanced Assistant ›    [Agent Tool Call: Executed "executeCommand" with args: {"command":"echo \'nja\'"}]';
+    const parsed = detectAndParseTextToolCalls(text);
+    
+    assert.strictEqual(parsed.calls.length, 1);
+    assert.strictEqual(parsed.calls[0].name, 'executeCommand');
+    assert.deepStrictEqual(parsed.calls[0].args, { command: "echo 'nja'" });
   });
 });
 

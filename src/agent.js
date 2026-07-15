@@ -22,7 +22,9 @@ import {
   getLmStudioHost,
   setLmStudioHost,
   getLmStudioAuth,
-  setLmStudioAuth
+  setLmStudioAuth,
+  isAutoMinimizeEnabled,
+  setAutoMinimizeEnabled
 } from './agent-config.js';
 
 import {
@@ -79,6 +81,8 @@ export {
   setLmStudioHost,
   getLmStudioAuth,
   setLmStudioAuth,
+  isAutoMinimizeEnabled,
+  setAutoMinimizeEnabled,
   tools,
   registerMcpTools,
   setReadlineInterface,

@@ -254,7 +254,7 @@ export class PersistentFileSessionService extends InMemorySessionService {
       currentBytes = Buffer.byteLength(JSON.stringify(session.events), 'utf8');
       currentKb = (currentBytes / 1024).toFixed(1);
       const savedKb = (totalBytesSaved / 1024).toFixed(1);
-      console.log(pc.green(`\n✔ [Local Minimization] Stripped older tool result payloads, saving ${pc.bold(savedKb)} KB of context space!`));
+      console.log(pc.green(`\n[Local Minimization] Stripped older tool result payloads, saving ${pc.bold(savedKb)} KB of context space!`));
       
       // If we managed to compress the session and it is now safely below 256KB, we can save and exit early!
       if (currentBytes <= 256 * 1024) {
@@ -340,9 +340,9 @@ export class PersistentFileSessionService extends InMemorySessionService {
 
           try {
             if (portions.length > 1) {
-              console.log(pc.yellow(`\n🤖 Asking model ${pc.bold(modelName)} to minimize portion ${portionIndex}/${portions.length} of ${role} message...`));
+              console.log(pc.yellow(`\nAsking model ${pc.bold(modelName)} to minimize portion ${portionIndex}/${portions.length} of ${role} message...`));
             } else {
-              console.log(pc.yellow(`\n🤖 Asking model ${pc.bold(modelName)} to minimize and compress ${role} message (${(portionText.length / 1024).toFixed(1)} KB)...`));
+              console.log(pc.yellow(`\nAsking model ${pc.bold(modelName)} to minimize and compress ${role} message (${(portionText.length / 1024).toFixed(1)} KB)...`));
             }
 
             const response = await fetch(`${baseUrl}/api/chat`, {
@@ -387,7 +387,7 @@ export class PersistentFileSessionService extends InMemorySessionService {
             }
           } catch (err) {
             clearTimeout(timeoutId);
-            console.log(pc.red(`\n⚠️  Minimization of portion ${portionIndex} failed (${err.message}).`));
+            console.log(pc.red(`\nMinimization of portion ${portionIndex} failed (${err.message}).`));
             portionFailed = true;
             break;
           }
@@ -401,7 +401,7 @@ export class PersistentFileSessionService extends InMemorySessionService {
             const timeoutId = setTimeout(() => controller.abort(), 30000);
 
             try {
-              console.log(pc.yellow(`\n🤖 Asking model ${pc.bold(modelName)} to synthesize ${portionSummaries.length} portion summaries for this message...`));
+              console.log(pc.yellow(`\nAsking model ${pc.bold(modelName)} to synthesize ${portionSummaries.length} portion summaries for this message...`));
               const response = await fetch(`${baseUrl}/api/chat`, {
                 method: 'POST',
                 headers: {
@@ -438,7 +438,7 @@ export class PersistentFileSessionService extends InMemorySessionService {
               }
             } catch (err) {
               clearTimeout(timeoutId);
-              console.log(pc.red(`\n⚠️  Synthesis of message portions failed (${err.message}).`));
+              console.log(pc.red(`\nSynthesis of message portions failed (${err.message}).`));
             }
           } else {
             return portionSummaries[0];
@@ -462,14 +462,14 @@ export class PersistentFileSessionService extends InMemorySessionService {
           try {
             minimizedText = await minimizeSingleMessageContent(ev.content, ev.role || 'user');
           } catch (err) {
-            console.log(pc.red(`⚠️  Model minimization failed (${err.message}). Falling back to heuristic truncation.`));
+            console.log(pc.red(`Model minimization failed (${err.message}). Falling back to heuristic truncation.`));
           }
 
           if (minimizedText === ev.content) {
             minimizedText = localHeuristicMinimize(ev.content);
-            console.log(pc.yellow(`✔ Heuristically truncated ${ev.role || 'user'} message: ${(originalLen / 1024).toFixed(1)} KB › ${(minimizedText.length / 1024).toFixed(1)} KB`));
+            console.log(pc.yellow(`Heuristically truncated ${ev.role || 'user'} message: ${(originalLen / 1024).toFixed(1)} KB › ${(minimizedText.length / 1024).toFixed(1)} KB`));
           } else {
-            console.log(pc.green(`✔ Minimized ${ev.role || 'user'} message: ${(originalLen / 1024).toFixed(1)} KB › ${(minimizedText.length / 1024).toFixed(1)} KB`));
+            console.log(pc.green(`Minimized ${ev.role || 'user'} message: ${(originalLen / 1024).toFixed(1)} KB › ${(minimizedText.length / 1024).toFixed(1)} KB`));
           }
 
           if (minimizedText !== ev.content) {
@@ -489,14 +489,14 @@ export class PersistentFileSessionService extends InMemorySessionService {
               try {
                 minimizedText = await minimizeSingleMessageContent(part.text, ev.role || 'user');
               } catch (err) {
-                console.log(pc.red(`⚠️  Model minimization failed (${err.message}). Falling back to heuristic truncation.`));
+                console.log(pc.red(`Model minimization failed (${err.message}). Falling back to heuristic truncation.`));
               }
 
               if (minimizedText === part.text) {
                 minimizedText = localHeuristicMinimize(part.text);
-                console.log(pc.yellow(`✔ Heuristically truncated ${ev.role || 'user'} message part [${i}]: ${(originalLen / 1024).toFixed(1)} KB › ${(minimizedText.length / 1024).toFixed(1)} KB`));
+                console.log(pc.yellow(`Heuristically truncated ${ev.role || 'user'} message part [${i}]: ${(originalLen / 1024).toFixed(1)} KB › ${(minimizedText.length / 1024).toFixed(1)} KB`));
               } else {
-                console.log(pc.green(`✔ Minimized ${ev.role || 'user'} message part [${i}]: ${(originalLen / 1024).toFixed(1)} KB › ${(minimizedText.length / 1024).toFixed(1)} KB`));
+                console.log(pc.green(`Minimized ${ev.role || 'user'} message part [${i}]: ${(originalLen / 1024).toFixed(1)} KB › ${(minimizedText.length / 1024).toFixed(1)} KB`));
               }
 
               if (minimizedText !== part.text) {
@@ -619,7 +619,7 @@ export async function runSessionsDashboard(rl, activeSessionId, sessionServiceIn
 
     printSessions(sessions, activeSessionId);
 
-    console.log(pc.bold('💡 Interactive Actions:'));
+    console.log(pc.bold('Interactive Actions:'));
     console.log(`  • ${pc.yellow('L <number>')}  : ${pc.bold('Load')} and resume a previous session (e.g. ${pc.yellow('L 1')})`);
     console.log(`  • ${pc.yellow('F <number>')}  : ${pc.bold('Fetch')} and print the conversation history of a session`);
     console.log(`  • ${pc.yellow('D <number>')}  : ${pc.bold('Delete')} a previous session from disk`);
@@ -634,24 +634,24 @@ export async function runSessionsDashboard(rl, activeSessionId, sessionServiceIn
     const targetIdxStr = parts[1];
 
     if (action === 'b' || action === 'back' || action === 'exit' || action === 'quit') {
-      console.log(pc.green('✔ Exited session dashboard.\n'));
+      console.log(pc.green('Exited session dashboard.\n'));
       break;
     }
 
     const index = parseInt(targetIdxStr, 10) - 1;
     if (isNaN(index) || index < 0 || index >= sessions.length) {
       if (['l', 'load', 'f', 'fetch', 'd', 'delete'].includes(action)) {
-        console.log(pc.red('❌ Error: Invalid session number. Please specify a valid number from the list.\n'));
+        console.log(pc.red('Error: Invalid session number. Please specify a valid number from the list.\n'));
         continue;
       }
-      console.log(pc.red(`❌ Error: Unknown action or invalid input: "${trimmed}".\n`));
+      console.log(pc.red(`Error: Unknown action or invalid input: "${trimmed}".\n`));
       continue;
     }
 
     const selectedSession = sessions[index];
 
     if (action === 'l' || action === 'load') {
-      console.log(pc.green(`✔ Loaded session: ${pc.bold(selectedSession.id)}`));
+      console.log(pc.green(`Loaded session: ${pc.bold(selectedSession.id)}`));
       return { action: 'load', sessionId: selectedSession.id };
     } 
     
@@ -672,13 +672,13 @@ export async function runSessionsDashboard(rl, activeSessionId, sessionServiceIn
           // Identify speaker
           let speaker = pc.green(pc.bold('You'));
           if (event.role === 'model') {
-            speaker = pc.magenta(pc.bold('🤖 Assistant'));
+            speaker = pc.magenta(pc.bold('Assistant'));
           } else if (event.role === 'system') {
-            speaker = pc.yellow(pc.bold('⚙️ System'));
+            speaker = pc.yellow(pc.bold('System'));
           } else if (event.type === 'tool_call' || (event.parts && event.parts.some(p => p.functionCall))) {
-            speaker = pc.cyan(pc.bold('🛠️ Agent Tool Call'));
+            speaker = pc.cyan(pc.bold('Agent Tool Call'));
           } else if (event.type === 'tool_result' || (event.parts && event.parts.some(p => p.functionResponse))) {
-            speaker = pc.blue(pc.bold('📦 Agent Tool Result'));
+            speaker = pc.blue(pc.bold('Agent Tool Result'));
           }
 
           let text = '';
@@ -709,17 +709,17 @@ export async function runSessionsDashboard(rl, activeSessionId, sessionServiceIn
     } 
     
     else if (action === 'd' || action === 'delete') {
-      const confirm = await rl.question(pc.red(`⚠️  Are you sure you want to delete session ${pc.bold(selectedSession.id)}? [y/N] › `));
+      const confirm = await rl.question(pc.red(`Are you sure you want to delete session ${pc.bold(selectedSession.id)}? [y/N] › `));
       if (confirm.toLowerCase().startsWith('y')) {
         await sessionServiceInstance.deleteSession({
           appName: 'plumar-cli',
           userId: 'default-user',
           sessionId: selectedSession.id
         });
-        console.log(pc.green(`✔ Session ${pc.bold(selectedSession.id)} successfully deleted.\n`));
+        console.log(pc.green(`Session ${pc.bold(selectedSession.id)} successfully deleted.\n`));
         
         if (selectedSession.id === activeSessionId) {
-          console.log(pc.yellow('💡 Note: You deleted your currently active session. Switching to a new clean session...\n'));
+          console.log(pc.yellow('Note: You deleted your currently active session. Switching to a new clean session...\n'));
           return { action: 'deleted_active' };
         }
       } else {
@@ -728,7 +728,7 @@ export async function runSessionsDashboard(rl, activeSessionId, sessionServiceIn
     } 
     
     else {
-      console.log(pc.red(`❌ Error: Unknown action: "${action}".\n`));
+      console.log(pc.red(`Error: Unknown action: "${action}".\n`));
     }
   }
 

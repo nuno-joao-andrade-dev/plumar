@@ -787,5 +787,19 @@ describe('PersistentFileSessionService Suite', () => {
       await service.deleteSession({ appName: 'plumar-cli', userId: 'default-user', sessionId });
     }
   });
+
+  test('should support autoMinimize context settings API', async () => {
+    const { isAutoMinimizeEnabled, setAutoMinimizeEnabled } = await import('../src/agent-config.js');
+    const initialStatus = isAutoMinimizeEnabled();
+    try {
+      setAutoMinimizeEnabled(true);
+      assert.strictEqual(isAutoMinimizeEnabled(), true);
+
+      setAutoMinimizeEnabled(false);
+      assert.strictEqual(isAutoMinimizeEnabled(), false);
+    } finally {
+      setAutoMinimizeEnabled(initialStatus);
+    }
+  });
 });
 

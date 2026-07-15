@@ -80,7 +80,7 @@ export function loadPolicyConfig(filepath) {
       return true;
     }
   } catch (err) {
-    console.error(pc.red(`\n⚠️  Error loading policy configuration from ${filepath}: ${err.message}`));
+    console.error(pc.red(`\nError loading policy configuration from ${filepath}: ${err.message}`));
   }
   return false;
 }
@@ -99,7 +99,7 @@ export function savePolicyConfig(filepath) {
     activePolicyConfigFile = filepath;
     return true;
   } catch (err) {
-    console.error(pc.red(`\n⚠️  Error saving policy configuration to ${filepath}: ${err.message}`));
+    console.error(pc.red(`\nError saving policy configuration to ${filepath}: ${err.message}`));
   }
   return false;
 }
@@ -159,7 +159,7 @@ export async function checkToolPermission(toolName, args) {
     return true;
   }
   if (policy === 'deny') {
-    console.log(pc.red(`\n🚫 [Policy Block] Tool "${pc.bold(toolName)}" execution blocked by user policy.`));
+    console.log(pc.red(`\n[Policy Block] Tool "${pc.bold(toolName)}" execution blocked by user policy.`));
     return false;
   }
   
@@ -175,7 +175,7 @@ export async function checkToolPermission(toolName, args) {
     process.stdin.setRawMode(false);
   }
   
-  console.log(pc.yellow(`\n❓ [Policy Prompt] Agent wants to execute tool "${pc.bold(toolName)}" with arguments:`));
+  console.log(pc.yellow(`\n[Policy Prompt] Agent wants to execute tool "${pc.bold(toolName)}" with arguments:`));
   console.log(pc.dim(JSON.stringify(args, null, 2)));
   
   let approved = false;
@@ -189,7 +189,7 @@ export async function checkToolPermission(toolName, args) {
     if (/[A-Z]/.test(trimmed)) {
       const policyValue = approved ? 'allow' : 'deny';
       toolPolicies[toolName] = policyValue;
-      console.log(pc.green(`✔ Policy for "${pc.bold(toolName)}" set to ${pc.bold(policyValue.toUpperCase())} permanently for this session.\n`));
+      console.log(pc.green(`Policy for "${pc.bold(toolName)}" set to ${pc.bold(policyValue.toUpperCase())} permanently for this session.\n`));
     }
   } catch (err) {
     approved = false;
@@ -201,7 +201,7 @@ export async function checkToolPermission(toolName, args) {
   }
   
   if (!approved) {
-    console.log(pc.red(`🚫 [Policy Prompt] Tool "${toolName}" execution declined by user.`));
+    console.log(pc.red(`[Policy Prompt] Tool "${toolName}" execution declined by user.`));
   }
   return approved;
 }

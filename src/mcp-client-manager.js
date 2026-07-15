@@ -22,12 +22,12 @@ class McpClient {
     this.process = spawn(command, args, { env: spawnEnv });
 
     this.process.on('error', (err) => {
-      process.stderr.write(`⚠️  [MCP Client ${this.name}] Failed to spawn process: ${err.message}\n`);
+      process.stderr.write(`[MCP Client ${this.name}] Failed to spawn process: ${err.message}\n`);
     });
 
     this.process.on('exit', (code) => {
       if (code !== 0 && code !== null) {
-        process.stderr.write(`⚠️  [MCP Client ${this.name}] Process exited with code ${code}\n`);
+        process.stderr.write(`[MCP Client ${this.name}] Process exited with code ${code}\n`);
       }
     });
 
@@ -56,7 +56,7 @@ class McpClient {
           }
         }
       } catch (err) {
-        process.stderr.write(`⚠️  [MCP Client ${this.name}] Parse error: ${err.message}\n`);
+        process.stderr.write(`[MCP Client ${this.name}] Parse error: ${err.message}\n`);
       }
     });
 
@@ -121,7 +121,7 @@ class McpClient {
       const payload = { jsonrpc: '2.0', method, params };
       this.process.stdin.write(JSON.stringify(payload) + '\n');
     } catch (err) {
-      process.stderr.write(`⚠️  [MCP Client ${this.name}] Failed to send notification "${method}": ${err.message}\n`);
+      process.stderr.write(`[MCP Client ${this.name}] Failed to send notification "${method}": ${err.message}\n`);
     }
   }
 
@@ -167,7 +167,7 @@ export async function loadAndStartMcpServers() {
   try {
     config = JSON.parse(content);
   } catch (err) {
-    process.stderr.write(`⚠️  Failed to parse mcp-servers.json: ${err.message}\n`);
+    process.stderr.write(`Failed to parse mcp-servers.json: ${err.message}\n`);
     return;
   }
 
@@ -252,10 +252,10 @@ export async function loadAndStartMcpServers() {
             }
           });
         }
-        process.stderr.write(`✔ Connected to MCP Server "${serverName}". Registered ${client.tools.length} tools.\n`);
+        process.stderr.write(`Connected to MCP Server "${serverName}". Registered ${client.tools.length} tools.\n`);
       })
       .catch((err) => {
-        process.stderr.write(`❌ Connection to MCP Server "${serverName}" failed: ${err.message}\n`);
+        process.stderr.write(`Connection to MCP Server "${serverName}" failed: ${err.message}\n`);
       });
 
     loadPromises.push(startPromise);

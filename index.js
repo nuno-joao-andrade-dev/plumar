@@ -75,7 +75,7 @@ export async function executePipeCommand(command, abortSignal) {
   }
 }
 
-import { runAgentTurn, tools, fetchOllamaModels, CHAT_MODES, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, getSessionTokens, castParameter, getLlmProvider, setLlmProvider, getOllamaHost, setOllamaHost, getLmStudioHost, setLmStudioHost, getLmStudioAuth, setLmStudioAuth } from './src/agent.js';
+import { runAgentTurn, tools, fetchOllamaModels, CHAT_MODES, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, getSessionTokens, castParameter, getLlmProvider, setLlmProvider, getOllamaHost, setOllamaHost, getLmStudioHost, setLmStudioHost, getLmStudioAuth, setLmStudioAuth, isAutoMinimizeEnabled, setAutoMinimizeEnabled } from './src/agent.js';
 import { loadAndStartMcpServers, getMcpTools } from './src/mcp-client-manager.js';
 import { 
   printBanner, 
@@ -184,7 +184,7 @@ export function printSettingsTable(title, settings) {
   const topBorder = pc.bold(pc.cyan('┌' + '─'.repeat(maxLabelWidth + 2) + '┬' + '─'.repeat(maxValueWidth + 2) + '┐'));
   const bottomBorder = pc.bold(pc.cyan('└' + '─'.repeat(maxLabelWidth + 2) + '┴' + '─'.repeat(maxValueWidth + 2) + '┘'));
   
-  console.log(pc.yellow(`\n⚙️  ${title}:`));
+  console.log(pc.yellow(`\n${title}:`));
   console.log(topBorder);
   
   for (const item of settings) {
@@ -255,7 +255,7 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
 
     await Promise.all([ollamaPromise, lmStudioPromise]);
 
-    console.log(pc.bold(pc.yellow('\n🤖 Available Models:')));
+    console.log(pc.bold(pc.yellow('\nAvailable Models:')));
     console.log(pc.bold(pc.cyan('─'.repeat(60))));
 
     let listIndex = 1;
@@ -323,7 +323,7 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
       let back = false;
       while (!back) {
         console.clear();
-        console.log(pc.bold(pc.yellow('\n⚙️  Configure Endpoints & Authentication:')));
+        console.log(pc.bold(pc.yellow('\nConfigure Endpoints & Authentication:')));
         console.log(pc.bold(pc.cyan('─'.repeat(60))));
         console.log(`  ${pc.cyan('[1]')} Configure Ollama Endpoint (current: ${pc.bold(getOllamaHost())})`);
         console.log(`  ${pc.cyan('[2]')} Configure Ollama Authentication Header/Token (current: ${pc.bold(getOllamaAuth() ? '******' : 'None')})`);
@@ -339,7 +339,7 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
           const newUrl = await rl.question(pc.cyan(`Enter Ollama Server URL (press [Enter] to keep current: ${getOllamaHost()}) › `));
           if (newUrl.trim()) {
             setOllamaHost(newUrl.trim());
-            console.log(pc.green(`✔ Ollama Host successfully updated to: ${pc.bold(getOllamaHost())}`));
+            console.log(pc.green(`Ollama Host successfully updated to: ${pc.bold(getOllamaHost())}`));
             await new Promise(r => setTimeout(r, 800));
           }
         } else if (trimmedChoice === '2') {
@@ -351,14 +351,14 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
             } else {
               setOllamaAuth(tAuth);
             }
-            console.log(pc.green(`✔ Ollama Authentication successfully updated.`));
+            console.log(pc.green(`Ollama Authentication successfully updated.`));
             await new Promise(r => setTimeout(r, 800));
           }
         } else if (trimmedChoice === '3') {
           const newUrl = await rl.question(pc.cyan(`Enter LM Studio Server URL (press [Enter] to keep current: ${getLmStudioHost()}) › `));
           if (newUrl.trim()) {
             setLmStudioHost(newUrl.trim());
-            console.log(pc.green(`✔ LM Studio Host successfully updated to: ${pc.bold(getLmStudioHost())}`));
+            console.log(pc.green(`LM Studio Host successfully updated to: ${pc.bold(getLmStudioHost())}`));
             await new Promise(r => setTimeout(r, 800));
           }
         } else if (trimmedChoice === '4') {
@@ -370,7 +370,7 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
             } else {
               setLmStudioAuth(tAuth);
             }
-            console.log(pc.green(`✔ LM Studio Authentication successfully updated.`));
+            console.log(pc.green(`LM Studio Authentication successfully updated.`));
             await new Promise(r => setTimeout(r, 800));
           }
         } else if (trimmedChoice === '5') {
@@ -389,7 +389,7 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
           chosenProvider = 'lmstudio';
         }
         setLlmProvider(chosenProvider);
-        console.log(pc.green(`✔ Configured with manual model name: ${pc.bold(selectedModel)}\n`));
+        console.log(pc.green(`Configured with manual model name: ${pc.bold(selectedModel)}\n`));
         return { selectedModel, provider: chosenProvider };
       }
     } else if (trimmed === 'e') {
@@ -406,8 +406,8 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
         const selected = modelLookup[choiceIndex];
         setLlmProvider(selected.provider);
         selectedModel = selected.name;
-        console.log(pc.green(`✔ Selected active provider: ${pc.bold(selected.provider === 'lmstudio' ? 'LM Studio' : 'Ollama')}`));
-        console.log(pc.green(`✔ Selected active model: ${pc.bold(selectedModel)}\n`));
+        console.log(pc.green(`Selected active provider: ${pc.bold(selected.provider === 'lmstudio' ? 'LM Studio' : 'Ollama')}`));
+        console.log(pc.green(`Selected active model: ${pc.bold(selectedModel)}\n`));
         await new Promise(r => setTimeout(r, 600));
         return { selectedModel, provider: selected.provider };
       } else {
@@ -415,12 +415,12 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
         if (matched) {
           setLlmProvider(matched.provider);
           selectedModel = matched.name;
-          console.log(pc.green(`✔ Selected active provider: ${pc.bold(matched.provider === 'lmstudio' ? 'LM Studio' : 'Ollama')}`));
-          console.log(pc.green(`✔ Selected active model: ${pc.bold(selectedModel)}\n`));
+          console.log(pc.green(`Selected active provider: ${pc.bold(matched.provider === 'lmstudio' ? 'LM Studio' : 'Ollama')}`));
+          console.log(pc.green(`Selected active model: ${pc.bold(selectedModel)}\n`));
           await new Promise(r => setTimeout(r, 600));
           return { selectedModel, provider: matched.provider };
         } else {
-          console.log(pc.red('❌ Invalid selection. Please enter a valid number or option letter.\n'));
+          console.log(pc.red('Invalid selection. Please enter a valid number or option letter.\n'));
           await new Promise(r => setTimeout(r, 1000));
         }
       }
@@ -459,7 +459,7 @@ async function main() {
     } else {
       // Initialize the new config file with current defaults
       savePolicyConfig(policyConfigPath);
-      console.log(pc.green(`✔ Created and initialized new policy config file: ${pc.bold(policyConfigPath)}\n`));
+      console.log(pc.green(`Created and initialized new policy config file: ${pc.bold(policyConfigPath)}\n`));
     }
   } else if (fs.existsSync('policy-config.json')) {
     loadPolicyConfig('policy-config.json');
@@ -555,7 +555,7 @@ async function main() {
   try {
     await initializeFormatter();
   } catch (err) {
-    process.stderr.write(`⚠️  Failed to initialize Glamour formatter: ${err.message}\n`);
+    process.stderr.write(`Failed to initialize Glamour formatter: ${err.message}\n`);
   }
 
   // 1.5. Initialize custom skills and plugins
@@ -571,14 +571,14 @@ async function main() {
       }
     }
   } catch (err) {
-    process.stderr.write(`⚠️  Failed to load custom skills/plugins: ${err.message}\n`);
+    process.stderr.write(`Failed to load custom skills/plugins: ${err.message}\n`);
   }
 
   // 1.6. Initialize persistent sessions
   try {
     await sessionService.init();
   } catch (err) {
-    process.stderr.write(`⚠️  Failed to initialize persistent sessions: ${err.message}\n`);
+    process.stderr.write(`Failed to initialize persistent sessions: ${err.message}\n`);
   }
 
   if (process.argv.includes('--mcp') || process.env.MCP_MODE === 'true') {
@@ -666,7 +666,7 @@ async function main() {
 
   // Clear screen before launching setup
   console.clear();
-  console.log(pc.magenta(pc.bold('🤖 Starting Plumar (plumar-cli)...')));
+  console.log(pc.magenta(pc.bold('Starting Plumar (plumar-cli)...')));
   
   // 1. Interactive Model Selection on Startup
   const setupResult = await runModelSelectionFlow(rl, true, activeModel);
@@ -681,9 +681,9 @@ async function main() {
     const parsedTemp = parseFloat(tempAnswer);
     if (!isNaN(parsedTemp) && parsedTemp >= 0 && parsedTemp <= 1.0) {
       activeTemperature = parsedTemp;
-      console.log(pc.green(`✔ Model temperature configured to: ${pc.bold(activeTemperature)}\n`));
+      console.log(pc.green(`Model temperature configured to: ${pc.bold(activeTemperature)}\n`));
     } else {
-      console.log(pc.yellow(`⚠️  Invalid temperature. Using profile default.\n`));
+      console.log(pc.yellow(`Invalid temperature. Using profile default.\n`));
       activeTemperature = null;
     }
   } else {
@@ -711,10 +711,10 @@ async function main() {
       if (answerTrimmed === '' || answerTrimmed.startsWith('y')) {
         sessionId = lastSession.id;
         await populateReadlineHistory(rl, sessionId);
-        console.log(pc.green(`✔ Loaded and resumed last session: ${pc.bold(sessionId)}\n`));
+        console.log(pc.green(`Loaded and resumed last session: ${pc.bold(sessionId)}\n`));
         await new Promise(r => setTimeout(r, 800));
       } else {
-        console.log(pc.yellow(`✔ Starting a new clean session.\n`));
+        console.log(pc.yellow(`Starting a new clean session.\n`));
         await new Promise(r => setTimeout(r, 600));
       }
     }
@@ -737,9 +737,9 @@ async function main() {
         try {
           await loadAndStartMcpServers();
           registerMcpTools(getMcpTools());
-          console.log(pc.green('✔ Connected to Model Context Protocol (MCP) servers successfully!\n'));
+          console.log(pc.green('Connected to Model Context Protocol (MCP) servers successfully!\n'));
         } catch (err) {
-          process.stderr.write(`⚠️  Failed to connect to external MCP servers: ${err.message}\n`);
+          process.stderr.write(`Failed to connect to external MCP servers: ${err.message}\n`);
         }
       }
       // Check if session size exceeds 256KB and suggest /minimize
@@ -753,7 +753,7 @@ async function main() {
           const serializedSize = Buffer.byteLength(JSON.stringify(session.events), 'utf8');
           const sizeKb = serializedSize / 1024;
           if (sizeKb > 256) {
-            console.log(pc.yellow(`\n💡 Tip: Your active session context is quite large (${sizeKb.toFixed(1)} KB, > 256 KB).`));
+            console.log(pc.yellow(`\nTip: Your active session context is quite large (${sizeKb.toFixed(1)} KB, > 256 KB).`));
             console.log(pc.yellow(`   Consider typing ${pc.bold('/minimize')} to prune older history and reduce latency.\n`));
           }
         }
@@ -806,7 +806,7 @@ async function main() {
             console.clear();
             printBanner();
             printStatus(activeModel, activeMode, CHAT_MODES[activeMode], activeTemperature);
-            console.log(pc.green(`✔ Successfully loaded and resumed session: ${pc.bold(sessionId)}\n`));
+            console.log(pc.green(`Successfully loaded and resumed session: ${pc.bold(sessionId)}\n`));
           } else if (result && result.action === 'deleted_active') {
             sessionId = 'session-' + Date.now();
             if (rl.history) {
@@ -817,7 +817,7 @@ async function main() {
             console.clear();
             printBanner();
             printStatus(activeModel, activeMode, CHAT_MODES[activeMode], activeTemperature);
-            console.log(pc.yellow(`✔ Active session was deleted. Started a new clean session: ${pc.bold(sessionId)}\n`));
+            console.log(pc.yellow(`Active session was deleted. Started a new clean session: ${pc.bold(sessionId)}\n`));
           } else {
             console.clear();
             printBanner();
@@ -829,7 +829,7 @@ async function main() {
         else if (command === '/history') {
           const { loadSearchHistory } = await import('./src/reverse-search.js');
           const historyList = await loadSearchHistory(rl, sessionService);
-          console.log(pc.yellow('\n📜 Command & Prompt History:'));
+          console.log(pc.yellow('\nCommand & Prompt History:'));
           if (historyList.length === 0) {
             console.log(pc.dim('  No history found yet.'));
           } else {
@@ -846,16 +846,16 @@ async function main() {
         else if (command === '/minimize') {
           const res = await sessionService.minimizeSession('plumar-cli', 'default-user', sessionId, 10, activeModel);
           if (!res) {
-            console.log(pc.yellow('\n⚠️  Active session has no history to minimize.\n'));
+            console.log(pc.yellow('\nActive session has no history to minimize.\n'));
             continue;
           }
 
           if (!res.success) {
-            console.log(pc.yellow(`\n⚠️  Active session is already minimized (${res.initialCount} events, ${res.initialKb} KB).\n`));
+            console.log(pc.yellow(`\nActive session is already minimized (${res.initialCount} events, ${res.initialKb} KB).\n`));
             continue;
           }
 
-          console.log(pc.green(`\n✔ Successfully minimized session context!`));
+          console.log(pc.green(`\nSuccessfully minimized session context!`));
           if (res.toolResultsStripped) {
             console.log(`  • ${pc.bold('Type')}:     ${pc.green('Tool-Result Stripping (Metadata Pruning)')}`);
             console.log(`  • ${pc.bold('History')}:  ${pc.green('All ' + res.finalCount + ' events preserved chronologically (older raw data pruned)')}`);
@@ -870,6 +870,29 @@ async function main() {
           continue;
         }
 
+        else if (command === '/auto-minimize' || command === '/autominimize') {
+          if (arg) {
+            const val = arg.trim().toLowerCase();
+            if (val === 'on' || val === 'true' || val === 'yes' || val === '1') {
+              setAutoMinimizeEnabled(true);
+              console.log(pc.green(`\nAuto-minimization of context has been turned ${pc.bold('ON')}.\n`));
+            } else if (val === 'off' || val === 'false' || val === 'no' || val === '0') {
+              setAutoMinimizeEnabled(false);
+              console.log(pc.yellow(`\nAuto-minimization of context has been turned ${pc.bold('OFF')}.\n`));
+            } else {
+              console.log(pc.red(`\nInvalid option: "${arg}". Use "on" or "off".\n`));
+            }
+          } else {
+            const enabled = isAutoMinimizeEnabled();
+            if (enabled) {
+              console.log(pc.green(`\nAuto-minimization of context is currently ${pc.bold('ON')}.\n`));
+            } else {
+              console.log(pc.yellow(`\nAuto-minimization of context is currently ${pc.bold('OFF')}.\n`));
+            }
+          }
+          continue;
+        }
+
         else if (command === '/context') {
           const ignoreDirs = ['node_modules', '.git', '.antigravitycli', '.gemini', 'package-lock.json', '.DS_Store'];
 
@@ -879,11 +902,11 @@ async function main() {
             try {
               const stat = await fs.promises.stat(targetDir);
               if (!stat.isDirectory()) {
-                console.log(pc.red(`\n❌ Error: "${arg}" is not a directory.\n`));
+                console.log(pc.red(`\nError: "${arg}" is not a directory.\n`));
                 continue;
               }
             } catch (err) {
-              console.log(pc.red(`\n❌ Error: Directory "${arg}" does not exist.\n`));
+              console.log(pc.red(`\nError: Directory "${arg}" does not exist.\n`));
               continue;
             }
           }
@@ -926,7 +949,7 @@ async function main() {
           console.log(pc.yellow(`\n🔍 Scanning folder workspace: ${pc.bold(targetDir)}...`));
           const files = await buildMinimizedContextTree(targetDir);
           if (files.length === 0) {
-            console.log(pc.yellow('⚠️  No files found in the specified directory.\n'));
+            console.log(pc.yellow('No files found in the specified directory.\n'));
             continue;
           }
 
@@ -952,13 +975,13 @@ async function main() {
                 sessionId: sessionId
               });
             } catch (e) {
-              console.log(pc.red(`❌ Error: Active session could not be created: ${e.message}\n`));
+              console.log(pc.red(`Error: Active session could not be created: ${e.message}\n`));
               continue;
             }
           }
 
           if (!session) {
-            console.log(pc.red('❌ Error: Active session could not be retrieved.\n'));
+            console.log(pc.red('Error: Active session could not be retrieved.\n'));
             continue;
           }
 
@@ -971,7 +994,7 @@ async function main() {
             }
           });
 
-          console.log(pc.green(`\n✔ Successfully minimized and loaded folder index into the active session context!`));
+          console.log(pc.green(`\nSuccessfully minimized and loaded folder index into the active session context!`));
           console.log(`  • ${pc.bold('Folder Scanned')}: ${pc.cyan(path.relative(process.cwd(), targetDir) || '.')}`);
           console.log(`  • ${pc.bold('Files Scanned')}:  ${pc.cyan(files.length)}`);
           console.log(`  • ${pc.bold('Session ID')}:     ${pc.cyan(sessionId)}\n`);
@@ -1006,17 +1029,17 @@ async function main() {
 
         else if (command === '/add-skill') {
           const { createSkill } = await import('./src/skills-plugins-manager.js');
-          console.log(pc.yellow('\n🎓 Create a New Custom Agentic Skill'));
+          console.log(pc.yellow('\nCreate a New Custom Agentic Skill'));
           const name = await rl.question(pc.cyan('Enter skill name (lowercase kebab-case/snake_case) › '));
           const trimmedName = name.trim();
           if (!trimmedName) {
-            console.log(pc.red('❌ Cancelled: Skill name cannot be empty.\n'));
+            console.log(pc.red('Cancelled: Skill name cannot be empty.\n'));
             continue;
           }
           const description = await rl.question(pc.cyan('Enter short skill description › '));
           const trimmedDesc = description.trim();
           if (!trimmedDesc) {
-            console.log(pc.red('❌ Cancelled: Description cannot be empty.\n'));
+            console.log(pc.red('Cancelled: Description cannot be empty.\n'));
             continue;
           }
           const tagsInput = await rl.question(pc.cyan('Enter tags (comma-separated, optional) › '));
@@ -1033,15 +1056,15 @@ async function main() {
           }
           const instructions = instructionsLines.join('\n').trim();
           if (!instructions) {
-            console.log(pc.red('❌ Cancelled: Instructions cannot be empty.\n'));
+            console.log(pc.red('Cancelled: Instructions cannot be empty.\n'));
             continue;
           }
           
           try {
             const skill = await createSkill(trimmedName, trimmedDesc, tags, instructions);
-            console.log(pc.green(`✔ Skill "${pc.bold(skill.name)}" created successfully!\n`));
+            console.log(pc.green(`Skill "${pc.bold(skill.name)}" created successfully!\n`));
           } catch (err) {
-            console.log(pc.red(`❌ Failed to create skill: ${err.message}\n`));
+            console.log(pc.red(`Failed to create skill: ${err.message}\n`));
           }
           continue;
         }
@@ -1058,7 +1081,7 @@ async function main() {
           const fileName = await rl.question(pc.cyan('Enter file name (e.g. "my-tool.js") › '));
           const trimmedFile = fileName.trim();
           if (!trimmedFile) {
-            console.log(pc.red('❌ Cancelled: File name cannot be empty.\n'));
+            console.log(pc.red('Cancelled: File name cannot be empty.\n'));
             continue;
           }
           
@@ -1098,16 +1121,16 @@ export const tool = new FunctionTool({
           }
           
           if (!codeContent) {
-            console.log(pc.red('❌ Cancelled: Code content cannot be empty.\n'));
+            console.log(pc.red('Cancelled: Code content cannot be empty.\n'));
             continue;
           }
           
           try {
             const plugin = await createPlugin(trimmedFile, codeContent);
-            console.log(pc.green(`✔ Plugin file "${pc.bold(plugin.fileName)}" created successfully!\n`));
-            console.log(pc.yellow('💡 Note: Please restart the CLI to load and activate your new plugin.\n'));
+            console.log(pc.green(`Plugin file "${pc.bold(plugin.fileName)}" created successfully!\n`));
+            console.log(pc.yellow('Note: Please restart the CLI to load and activate your new plugin.\n'));
           } catch (err) {
-            console.log(pc.red(`❌ Failed to create plugin: ${err.message}\n`));
+            console.log(pc.red(`Failed to create plugin: ${err.message}\n`));
           }
           continue;
         }
@@ -1167,7 +1190,7 @@ export const tool = new FunctionTool({
         else if (command === '/verbose') {
           const current = isVerboseJsonEnabled();
           setVerboseJsonEnabled(!current);
-          console.log(pc.green(`✔ Verbose JSON payload logging is now ${pc.bold(isVerboseJsonEnabled() ? 'ENABLED' : 'DISABLED')}.\n`));
+          console.log(pc.green(`Verbose JSON payload logging is now ${pc.bold(isVerboseJsonEnabled() ? 'ENABLED' : 'DISABLED')}.\n`));
           displaySettingsTable();
           continue;
         }
@@ -1175,7 +1198,7 @@ export const tool = new FunctionTool({
         else if (command === '/adk-info') {
           const current = isAdkInfoEnabled();
           setAdkInfoEnabled(!current);
-          console.log(pc.green(`✔ ADK internal info logging is now ${pc.bold(isAdkInfoEnabled() ? 'ENABLED' : 'DISABLED')}.\n`));
+          console.log(pc.green(`ADK internal info logging is now ${pc.bold(isAdkInfoEnabled() ? 'ENABLED' : 'DISABLED')}.\n`));
           displaySettingsTable();
           continue;
         } 
@@ -1183,7 +1206,7 @@ export const tool = new FunctionTool({
         else if (command === '/provider') {
           if (!arg) {
             const current = getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama';
-            console.log(`\n🤖 ${pc.bold('Current LLM Provider')}: ${pc.magenta(current)}`);
+            console.log(`\n${pc.bold('Current LLM Provider')}: ${pc.magenta(current)}`);
             const answer = await rl.question(pc.cyan('Enter new provider (1 for Ollama, 2 for LM Studio) › '));
             const trimmed = answer.trim();
             if (trimmed === '1') {
@@ -1194,12 +1217,12 @@ export const tool = new FunctionTool({
               setLlmProvider(trimmed);
             }
             const resolved = getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama';
-            console.log(pc.green(`✔ LLM Provider successfully switched to: ${pc.bold(resolved)}\n`));
+            console.log(pc.green(`LLM Provider successfully switched to: ${pc.bold(resolved)}\n`));
             displaySettingsTable();
           } else {
             setLlmProvider(arg);
             const resolved = getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama';
-            console.log(pc.green(`✔ LLM Provider successfully switched to: ${pc.bold(resolved)}\n`));
+            console.log(pc.green(`LLM Provider successfully switched to: ${pc.bold(resolved)}\n`));
             displaySettingsTable();
           }
           continue;
@@ -1221,7 +1244,7 @@ export const tool = new FunctionTool({
             
             if (['provider', 'llm-provider', 'type'].includes(key)) {
               if (!value) {
-                console.log(`\n🤖 ${pc.bold('Current LLM Provider')}: ${pc.magenta(getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama')}`);
+                console.log(`\n${pc.bold('Current LLM Provider')}: ${pc.magenta(getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama')}`);
                 const newProvider = await rl.question(pc.cyan('Enter new provider (1 for Ollama, 2 for LM Studio) › '));
                 const trimmed = newProvider.trim();
                 if (trimmed === '1') {
@@ -1232,12 +1255,12 @@ export const tool = new FunctionTool({
                   setLlmProvider(trimmed);
                 }
                 const resolved = getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama';
-                console.log(pc.green(`✔ LLM Provider successfully updated to: ${pc.bold(resolved)}\n`));
+                console.log(pc.green(`LLM Provider successfully updated to: ${pc.bold(resolved)}\n`));
                 displaySettingsTable();
               } else {
                 setLlmProvider(value);
                 const resolved = getLlmProvider() === 'lmstudio' ? 'LM Studio' : 'Ollama';
-                console.log(pc.green(`✔ LLM Provider successfully updated to: ${pc.bold(resolved)}\n`));
+                console.log(pc.green(`LLM Provider successfully updated to: ${pc.bold(resolved)}\n`));
                 displaySettingsTable();
               }
             } else if (['ollama', 'endpoint', 'host'].includes(key)) {
@@ -1247,12 +1270,12 @@ export const tool = new FunctionTool({
                 const trimmedHost = newHost.trim();
                 if (trimmedHost) {
                   setOllamaBaseUrl(trimmedHost);
-                  console.log(pc.green(`✔ ${providerName} Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
+                  console.log(pc.green(`${providerName} Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
                   displaySettingsTable();
                 }
               } else {
                 setOllamaBaseUrl(value);
-                console.log(pc.green(`✔ ${providerName} Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
+                console.log(pc.green(`${providerName} Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
                 displaySettingsTable();
               }
             } else if (['auth', 'token', 'key'].includes(key)) {
@@ -1261,47 +1284,47 @@ export const tool = new FunctionTool({
                 const newAuth = await rl.question(pc.cyan(`Enter new ${providerName} Auth (e.g. Bearer token, or custom header X-API-Key:key) › `));
                 const trimmedAuth = newAuth.trim();
                 setOllamaAuth(trimmedAuth);
-                console.log(pc.green(`✔ ${providerName} Auth successfully updated.\n`));
+                console.log(pc.green(`${providerName} Auth successfully updated.\n`));
                 displaySettingsTable();
               } else {
                 setOllamaAuth(value);
-                console.log(pc.green(`✔ ${providerName} Auth successfully updated.\n`));
+                console.log(pc.green(`${providerName} Auth successfully updated.\n`));
                 displaySettingsTable();
               }
             } else if (key === 'verbose') {
               if (['on', 'true', 'yes'].includes(value.toLowerCase())) {
                 setVerboseJsonEnabled(true);
-                console.log(pc.green(`✔ Verbose JSON logs enabled.\n`));
+                console.log(pc.green(`Verbose JSON logs enabled.\n`));
               } else if (['off', 'false', 'no'].includes(value.toLowerCase())) {
                 setVerboseJsonEnabled(false);
-                console.log(pc.green(`✔ Verbose JSON logs disabled.\n`));
+                console.log(pc.green(`Verbose JSON logs disabled.\n`));
               } else {
                 setVerboseJsonEnabled(!isVerboseJsonEnabled());
-                console.log(pc.green(`✔ Verbose JSON logs toggled to: ${pc.bold(isVerboseJsonEnabled() ? 'ON' : 'OFF')}\n`));
+                console.log(pc.green(`Verbose JSON logs toggled to: ${pc.bold(isVerboseJsonEnabled() ? 'ON' : 'OFF')}\n`));
               }
               displaySettingsTable();
             } else if (key === 'adk-info') {
               if (['on', 'true', 'yes'].includes(value.toLowerCase())) {
                 setAdkInfoEnabled(true);
-                console.log(pc.green(`✔ ADK Info logs enabled.\n`));
+                console.log(pc.green(`ADK Info logs enabled.\n`));
               } else if (['off', 'false', 'no'].includes(value.toLowerCase())) {
                 setAdkInfoEnabled(false);
-                console.log(pc.green(`✔ ADK Info logs disabled.\n`));
+                console.log(pc.green(`ADK Info logs disabled.\n`));
               } else {
                 setAdkInfoEnabled(!isAdkInfoEnabled());
-                console.log(pc.green(`✔ ADK Info logs toggled to: ${pc.bold(isAdkInfoEnabled() ? 'ON' : 'OFF')}\n`));
+                console.log(pc.green(`ADK Info logs toggled to: ${pc.bold(isAdkInfoEnabled() ? 'ON' : 'OFF')}\n`));
               }
               displaySettingsTable();
             } else if (key === 'policy') {
               if (['allow', 'ask', 'deny'].includes(value.toLowerCase())) {
                 setDefaultPolicy(value.toLowerCase());
-                console.log(pc.green(`✔ Default tool policy set to: ${pc.bold(value.toUpperCase())}\n`));
+                console.log(pc.green(`Default tool policy set to: ${pc.bold(value.toUpperCase())}\n`));
                 displaySettingsTable();
               } else {
-                console.log(pc.red(`❌ Invalid policy. Choose from: allow, ask, deny\n`));
+                console.log(pc.red(`Invalid policy. Choose from: allow, ask, deny\n`));
               }
             } else {
-              console.log(pc.red(`❌ Unknown settings key: "${key}".\nAvailable keys: ollama, auth, verbose, adk-info, policy\n`));
+              console.log(pc.red(`Unknown settings key: "${key}".\nAvailable keys: ollama, auth, verbose, adk-info, policy\n`));
             }
           }
           continue;
@@ -1313,7 +1336,7 @@ export const tool = new FunctionTool({
           
           if (args.length === 0) {
             // Display all policies
-            console.log(pc.bold(pc.yellow('\n🛡️  Tool Execution Policies:')));
+            console.log(pc.bold(pc.yellow('\n🛡Tool Execution Policies:')));
             console.log(`  • ${pc.bold('Default Policy')}: ${formatPolicy(getDefaultPolicy())}`);
             
             const activeConfig = getActivePolicyConfigFile();
@@ -1337,40 +1360,40 @@ export const tool = new FunctionTool({
             
             console.log(pc.bold(pc.cyan('└──────────────────────────────────────────────────┴──────────┘')));
             console.log();
-            console.log(`💡 To change policy: ${pc.yellow('/policy [default|<tool_name>] [allow|ask|deny]')}`);
-            console.log(`💡 To manage config: ${pc.yellow('/policy config [filepath]')}\n`);
+            console.log(`To change policy: ${pc.yellow('/policy [default|<tool_name>] [allow|ask|deny]')}`);
+            console.log(`To manage config: ${pc.yellow('/policy config [filepath]')}\n`);
           } else if (args[0].toLowerCase() === 'config') {
             if (args.length === 1) {
               const activeConfig = getActivePolicyConfigFile();
               if (activeConfig) {
-                console.log(pc.green(`\n✔ Active policy config file: ${pc.bold(activeConfig)}\n`));
+                console.log(pc.green(`\nActive policy config file: ${pc.bold(activeConfig)}\n`));
               } else {
-                console.log(pc.yellow(`\n🛡️  No active policy config file. Policies are kept in memory only.`));
-                console.log(`💡 To save policies to a file, run: ${pc.yellow('/policy config policy-config.json')}\n`);
+                console.log(pc.yellow(`\n🛡No active policy config file. Policies are kept in memory only.`));
+                console.log(`To save policies to a file, run: ${pc.yellow('/policy config policy-config.json')}\n`);
               }
             } else {
               const filepath = args[1];
               if (fs.existsSync(filepath)) {
                 loadPolicyConfig(filepath);
-                console.log(pc.green(`\n✔ Policy configuration successfully loaded from: ${pc.bold(filepath)}\n`));
+                console.log(pc.green(`\nPolicy configuration successfully loaded from: ${pc.bold(filepath)}\n`));
               } else {
                 savePolicyConfig(filepath);
-                console.log(pc.green(`\n✔ Created and initialized new policy config file with current settings at: ${pc.bold(filepath)}\n`));
+                console.log(pc.green(`\nCreated and initialized new policy config file with current settings at: ${pc.bold(filepath)}\n`));
               }
             }
           } else if (args.length === 1) {
             const target = args[0].toLowerCase();
             if (['allow', 'ask', 'deny'].includes(target)) {
               setDefaultPolicy(target);
-              console.log(pc.green(`✔ Default tool execution policy successfully changed to: ${pc.bold(target.toUpperCase())}\n`));
+              console.log(pc.green(`Default tool execution policy successfully changed to: ${pc.bold(target.toUpperCase())}\n`));
             } else {
               const resolvedToolName = Object.keys(tools).find(t => t.toLowerCase() === target);
               if (resolvedToolName) {
                 const policy = getToolPolicy(resolvedToolName);
                 const isOverride = getAllToolPolicies().overrides[resolvedToolName] !== undefined;
-                console.log(`\n🛡️  Policy for "${pc.bold(resolvedToolName)}": ${formatPolicy(policy)} ${isOverride ? pc.dim('(Override)') : pc.dim('(Default)')}\n`);
+                console.log(`\n🛡Policy for "${pc.bold(resolvedToolName)}": ${formatPolicy(policy)} ${isOverride ? pc.dim('(Override)') : pc.dim('(Default)')}\n`);
               } else {
-                console.log(pc.red(`❌ Unknown tool or policy option: "${target}".\n`));
+                console.log(pc.red(`Unknown tool or policy option: "${target}".\n`));
               }
             }
           } else {
@@ -1378,17 +1401,17 @@ export const tool = new FunctionTool({
             const policy = args[1].toLowerCase();
             
             if (!['allow', 'ask', 'deny'].includes(policy)) {
-              console.log(pc.red(`❌ Invalid policy option: "${policy}". Must be allow, ask, or deny.\n`));
+              console.log(pc.red(`Invalid policy option: "${policy}". Must be allow, ask, or deny.\n`));
             } else if (target.toLowerCase() === 'default') {
               setDefaultPolicy(policy);
-              console.log(pc.green(`✔ Default tool execution policy successfully changed to: ${pc.bold(policy.toUpperCase())}\n`));
+              console.log(pc.green(`Default tool execution policy successfully changed to: ${pc.bold(policy.toUpperCase())}\n`));
             } else {
               const resolvedToolName = Object.keys(tools).find(t => t.toLowerCase() === target.toLowerCase());
               if (resolvedToolName) {
                 setToolPolicy(resolvedToolName, policy);
-                console.log(pc.green(`✔ Tool "${pc.bold(resolvedToolName)}" policy successfully set to: ${pc.bold(policy.toUpperCase())}\n`));
+                console.log(pc.green(`Tool "${pc.bold(resolvedToolName)}" policy successfully set to: ${pc.bold(policy.toUpperCase())}\n`));
               } else {
-                console.log(pc.red(`❌ Unknown tool: "${target}".\n`));
+                console.log(pc.red(`Unknown tool: "${target}".\n`));
               }
             }
           }
@@ -1405,12 +1428,12 @@ export const tool = new FunctionTool({
             const trimmedHost = newHost.trim();
             if (trimmedHost) {
               setOllamaBaseUrl(trimmedHost);
-              console.log(pc.green(`✔ ${providerName} Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
+              console.log(pc.green(`${providerName} Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
               displaySettingsTable();
             }
           } else {
             setOllamaBaseUrl(arg);
-            console.log(pc.green(`✔ ${providerName} Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
+            console.log(pc.green(`${providerName} Endpoint successfully updated to: ${pc.bold(getOllamaBaseUrl())}\n`));
             displaySettingsTable();
           }
           continue;
@@ -1429,9 +1452,9 @@ export const tool = new FunctionTool({
               console.clear();
               printBanner();
               printStatus(activeModel, activeMode, CHAT_MODES[activeMode], activeTemperature);
-              console.log(pc.green(`✔ Mode successfully switched to: ${pc.bold(CHAT_MODES[activeMode].name)}\n`));
+              console.log(pc.green(`Mode successfully switched to: ${pc.bold(CHAT_MODES[activeMode].name)}\n`));
             } else if (selectedKey) {
-              console.log(pc.red(`❌ Unknown mode key: "${selectedKey}". Switch cancelled.\n`));
+              console.log(pc.red(`Unknown mode key: "${selectedKey}". Switch cancelled.\n`));
             }
           } else {
             // Direct switch via command, e.g. /mode code
@@ -1441,9 +1464,9 @@ export const tool = new FunctionTool({
               console.clear();
               printBanner();
               printStatus(activeModel, activeMode, CHAT_MODES[activeMode], activeTemperature);
-              console.log(pc.green(`✔ Mode switched to: ${pc.bold(CHAT_MODES[activeMode].name)}\n`));
+              console.log(pc.green(`Mode switched to: ${pc.bold(CHAT_MODES[activeMode].name)}\n`));
             } else {
-              console.log(pc.red(`❌ Unknown mode: "${selectedKey}". Type ${pc.yellow('/mode')} to list available modes.\n`));
+              console.log(pc.red(`Unknown mode: "${selectedKey}". Type ${pc.yellow('/mode')} to list available modes.\n`));
             }
           }
           continue;
@@ -1456,7 +1479,7 @@ export const tool = new FunctionTool({
           const paramValue = subparts.slice(3).join(' ').trim();
 
           if (action === 'list') {
-            console.log(`\n⚙️  ${pc.bold('Active Session Ollama Parameters')} for Model ${pc.bold(activeModel)}:`);
+            console.log(`\n${pc.bold('Active Session Ollama Parameters')} for Model ${pc.bold(activeModel)}:`);
             console.log(pc.bold(pc.cyan('┌─────────────────┬──────────────────────┬──────────────────────┬──────────────────────┐')));
             console.log(pc.bold(pc.cyan('│ Parameter Name  │ Current Mode Value   │ Session Override     │ Resolved Value       │')));
             console.log(pc.bold(pc.cyan('├─────────────────┼──────────────────────┼──────────────────────┼──────────────────────┤')));
@@ -1493,14 +1516,14 @@ export const tool = new FunctionTool({
               console.log(pc.bold(pc.cyan('│ ')) + col1 + pc.bold(pc.cyan(' │ ')) + col2 + pc.bold(pc.cyan(' │ ')) + col3 + pc.bold(pc.cyan(' │ ')) + col4 + pc.bold(pc.cyan('│')));
             });
             console.log(pc.bold(pc.cyan('└─────────────────┴──────────────────────┴──────────────────────┴──────────────────────┘')));
-            console.log(`💡 Usage: ${pc.yellow('/parameter set <name> <value>')} or ${pc.yellow('/parameter get <name>')}\n`);
+            console.log(`Usage: ${pc.yellow('/parameter set <name> <value>')} or ${pc.yellow('/parameter get <name>')}\n`);
           } else if (action === 'get') {
             if (!paramName) {
-              console.log(pc.red(`❌ Missing parameter name. Usage: ${pc.yellow('/parameter get [parameter name]')}\n`));
+              console.log(pc.red(`Missing parameter name. Usage: ${pc.yellow('/parameter get [parameter name]')}\n`));
               continue;
             }
             if (!ALLOWED_PARAMETERS.includes(paramName)) {
-              console.log(pc.red(`❌ Unknown parameter: "${paramName}". Allowed parameters are:\n   ${ALLOWED_PARAMETERS.join(', ')}\n`));
+              console.log(pc.red(`Unknown parameter: "${paramName}". Allowed parameters are:\n   ${ALLOWED_PARAMETERS.join(', ')}\n`));
               continue;
             }
             
@@ -1524,11 +1547,11 @@ export const tool = new FunctionTool({
             console.log(`  • Resolved Value: ${pc.cyan(pc.bold(JSON.stringify(resolved)))}\n`);
           } else if (action === 'set') {
             if (!paramName) {
-              console.log(pc.red(`❌ Missing parameter name. Usage: ${pc.yellow('/parameter set [parameter name] [value]')}\n`));
+              console.log(pc.red(`Missing parameter name. Usage: ${pc.yellow('/parameter set [parameter name] [value]')}\n`));
               continue;
             }
             if (!ALLOWED_PARAMETERS.includes(paramName)) {
-              console.log(pc.red(`❌ Unknown parameter: "${paramName}". Allowed parameters are:\n   ${ALLOWED_PARAMETERS.join(', ')}\n`));
+              console.log(pc.red(`Unknown parameter: "${paramName}". Allowed parameters are:\n   ${ALLOWED_PARAMETERS.join(', ')}\n`));
               continue;
             }
             if (!paramValue) {
@@ -1537,14 +1560,14 @@ export const tool = new FunctionTool({
               if (paramName === 'temperature') {
                 activeTemperature = null;
               }
-              console.log(pc.green(`✔ Parameter "${pc.bold(paramName)}" has been reset to mode defaults.\n`));
+              console.log(pc.green(`Parameter "${pc.bold(paramName)}" has been reset to mode defaults.\n`));
               continue;
             }
             
             // Cast and validate
             const casted = castParameter(paramName, paramValue);
             if (casted === null) {
-              console.log(pc.red(`❌ Invalid value "${paramValue}" for parameter "${paramName}".\n`));
+              console.log(pc.red(`Invalid value "${paramValue}" for parameter "${paramName}".\n`));
               continue;
             }
             
@@ -1552,9 +1575,9 @@ export const tool = new FunctionTool({
             if (paramName === 'temperature') {
               activeTemperature = casted;
             }
-            console.log(pc.green(`✔ Parameter "${pc.bold(paramName)}" successfully set to: ${pc.bold(JSON.stringify(casted))}\n`));
+            console.log(pc.green(`Parameter "${pc.bold(paramName)}" successfully set to: ${pc.bold(JSON.stringify(casted))}\n`));
           } else {
-            console.log(pc.red(`❌ Unknown action "${action}". Usage: ${pc.yellow('/parameter [list|set|get] [parameter name] [value]')}\n`));
+            console.log(pc.red(`Unknown action "${action}". Usage: ${pc.yellow('/parameter [list|set|get] [parameter name] [value]')}\n`));
           }
           continue;
         } 
@@ -1573,7 +1596,7 @@ export const tool = new FunctionTool({
                 if (!isNaN(parsedTemp) && parsedTemp >= 0 && parsedTemp <= 1.0) {
                   activeTemperature = parsedTemp;
                 } else {
-                  console.log(pc.yellow(`⚠️  Invalid temperature. Using profile default.`));
+                  console.log(pc.yellow(`Invalid temperature. Using profile default.`));
                   activeTemperature = null;
                 }
               } else {
@@ -1583,18 +1606,18 @@ export const tool = new FunctionTool({
               console.clear();
               printBanner();
               printStatus(activeModel, activeMode, CHAT_MODES[activeMode], activeTemperature);
-              console.log(pc.green(`✔ Model successfully changed to: ${pc.bold(activeModel)}\n`));
+              console.log(pc.green(`Model successfully changed to: ${pc.bold(activeModel)}\n`));
             } else {
-              console.log(pc.yellow('⚠️  Model switch cancelled.\n'));
+              console.log(pc.yellow('Model switch cancelled.\n'));
             }
           } catch (err) {
-            console.log(pc.red(`❌ Failed to run model selection: ${err.message}\n`));
+            console.log(pc.red(`Failed to run model selection: ${err.message}\n`));
           }
           continue;
         } 
         
         else {
-          console.log(pc.red(`❌ Unknown command: ${command}. Type ${pc.yellow('/help')} for a list of commands.\n`));
+          console.log(pc.red(`Unknown command: ${command}. Type ${pc.yellow('/help')} for a list of commands.\n`));
           continue;
         }
       }
@@ -1630,7 +1653,7 @@ export const tool = new FunctionTool({
         if (pipeMatch.command) {
           if (pipeMatch.prompt === '') {
             // Direct command execution bypass! No AI model call, just execute and present the output.
-            console.log(pc.yellow(`\n⚙️  Executing shell command: ${pc.bold(pipeMatch.command)}... (Press ESC to cancel)`));
+            console.log(pc.yellow(`\nExecuting shell command: ${pc.bold(pipeMatch.command)}... (Press ESC to cancel)`));
             const shellOutput = await executePipeCommand(pipeMatch.command, controller.signal);
             if (controller.signal.aborted) {
               throw new Error('Request cancelled by user (ESC)');
@@ -1640,12 +1663,12 @@ export const tool = new FunctionTool({
             continue;
           }
 
-          console.log(pc.yellow(`\n⚙️  Executing shell command: ${pc.bold(pipeMatch.command)}... (Press ESC to cancel)`));
+          console.log(pc.yellow(`\nExecuting shell command: ${pc.bold(pipeMatch.command)}... (Press ESC to cancel)`));
           const shellOutput = await executePipeCommand(pipeMatch.command, controller.signal);
           if (controller.signal.aborted) {
             throw new Error('Request cancelled by user (ESC)');
           }
-          console.log(pc.green(`✔ Captured shell output (${shellOutput.length} characters)`));
+          console.log(pc.green(`Captured shell output (${shellOutput.length} characters)`));
 
           let showAnswer = '';
           if (alwaysShowOutput === true) {
@@ -1658,7 +1681,7 @@ export const tool = new FunctionTool({
               process.stdin.setRawMode(false);
             }
 
-            showAnswer = await rl.question(pc.cyan('❓ Show captured output? (y/n/Y/N) [y/N] › '));
+            showAnswer = await rl.question(pc.cyan('Show captured output? (y/n/Y/N) [y/N] › '));
 
             // Re-enable raw mode for the rest of execution
             if (process.stdin.setRawMode) {
@@ -1681,6 +1704,43 @@ export const tool = new FunctionTool({
 
           finalPrompt = `${pipeMatch.prompt}\n\n### Shell Output of \`${pipeMatch.command}\`:\n\`\`\`\n${shellOutput}\n\`\`\``;
         }
+        
+        // Parse and automatically inject files specified via @filename syntax
+        const fileRegex = /(?:^|\s)@([a-zA-Z0-9_\-\.\/\\~]+)/g;
+        let fileMatch;
+        const injectedFiles = new Set();
+        
+        while ((fileMatch = fileRegex.exec(finalPrompt)) !== null) {
+          const filePath = fileMatch[1];
+          // Strip trailing punctuation from matched filename (e.g. "@hello.cpp." -> "hello.cpp")
+          const cleanPath = filePath.replace(/[\.,;\?!]+$/, '');
+          injectedFiles.add(cleanPath);
+        }
+        
+        for (const file of injectedFiles) {
+          const absolutePath = path.resolve(process.cwd(), file);
+          if (fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile()) {
+            try {
+              const content = fs.readFileSync(absolutePath, 'utf8');
+              const maxChars = 15000;
+              let finalContent = content;
+              let isTruncated = false;
+              if (content.length > maxChars) {
+                finalContent = content.slice(0, maxChars);
+                isTruncated = true;
+              }
+              
+              console.log(pc.green(`📎 Automatically loaded file content of @${file}${isTruncated ? ' (truncated to 15KB)' : ''}`));
+              
+              finalPrompt += `\n\n### Content of file \`@${file}\`:\n\`\`\`\n${finalContent}\n\`\`\``;
+              if (isTruncated) {
+                finalPrompt += `\n... [Content truncated for prompt injection] ...`;
+              }
+            } catch (err) {
+              console.log(pc.yellow(`Could not automatically read @${file}: ${err.message}`));
+            }
+          }
+        }
 
         let sessionEvents = [];
         try {
@@ -1699,9 +1759,9 @@ export const tool = new FunctionTool({
         const sessionBytes = Buffer.byteLength(JSON.stringify(sessionEvents), 'utf8');
         const sessionKb = sessionBytes / 1024;
 
-        console.log(pc.dim(`\n🤖 Agent [${CHAT_MODES[activeMode].name}] is thinking & executing tools using ${activeModel}... (Press ESC to cancel)`));
-        if (sessionKb > 35 || sessionEvents.length >= 12) {
-          console.log(pc.dim(`   💡 ${pc.yellow('Tip:')} Your conversation context is getting large (${sessionKb.toFixed(1)} KB, ${sessionEvents.length} events).`));
+        console.log(pc.dim(`\nAgent [${CHAT_MODES[activeMode].name}] is thinking & executing tools using ${activeModel}... (Press ESC to cancel)`));
+        if (sessionKb > 256) {
+          console.log(pc.dim(`   ${pc.yellow('Tip:')} Your conversation context is getting large (${sessionKb.toFixed(1)} KB, ${sessionEvents.length} events).`));
           console.log(pc.dim(`      If generation is slow, run the ${pc.yellow('/minimize')} command to prune and compress history.`));
         }
 
@@ -1719,20 +1779,27 @@ export const tool = new FunctionTool({
         // Print final assistant response text
         const formattedText = text.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
         const processedText = formatChatResponse(formattedText);
-        console.log(`${pc.magenta(pc.bold(`🤖 ${CHAT_MODES[activeMode].name} › `))} ${processedText}\n`);
+        console.log(`${pc.magenta(pc.bold(`${CHAT_MODES[activeMode].name} › `))} ${processedText}\n`);
+
+        if (isAutoMinimizeEnabled()) {
+          const minRes = await sessionService.minimizeSession('plumar-cli', 'default-user', sessionId, 10, activeModel);
+          if (minRes && minRes.success) {
+            console.log(pc.dim(`  [Auto-Minimize] Pruned and compressed context from ${minRes.initialKb} KB to ${minRes.finalKb} KB.\n`));
+          }
+        }
 
       } catch (error) {
         console.log('\n');
         if (controller.signal.aborted || error.message.includes('cancelled by user')) {
-          console.log(pc.red(pc.bold('🛑 Request cancelled by user (ESC).\n')));
+          console.log(pc.red(pc.bold('Request cancelled by user (ESC).\n')));
         } else if (error.name === 'AbortError' || error.name === 'TimeoutError' || error.message.toLowerCase().includes('timeout')) {
-          console.error(pc.red(pc.bold('❌ Error executing agent turn:')));
+          console.error(pc.red(pc.bold('Error executing agent turn:')));
           console.error(pc.red(`   Request timed out or connection lost. The model failed to return content.`));
-          console.log(pc.yellow(`\n💡 Tip: Check if your local LLM server (Ollama/LM Studio) is running, responsive, and has enough resources to run model "${activeModel}".\n`));
+          console.log(pc.yellow(`\nTip: Check if your local LLM server (Ollama/LM Studio) is running, responsive, and has enough resources to run model "${activeModel}".\n`));
         } else {
-          console.error(pc.red(pc.bold('❌ Error executing agent turn:')));
+          console.error(pc.red(pc.bold('Error executing agent turn:')));
           console.error(pc.red(`   ${error.message}`));
-          console.log(pc.yellow(`\n💡 Tip: Check if Ollama is active and model "${activeModel}" is fully loaded.\n`));
+          console.log(pc.yellow(`\nTip: Check if Ollama is active and model "${activeModel}" is fully loaded.\n`));
         }
       } finally {
         process.stdin.removeListener('keypress', keypressHandler);

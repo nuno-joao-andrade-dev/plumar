@@ -79,6 +79,9 @@ export function loadProviderSettings() {
         } else if (parsed.provider && parsed.provider.lmStudioAuth !== undefined) {
           lmStudioAuth = parsed.provider.lmStudioAuth;
         }
+        if (parsed.autoMinimize !== undefined) {
+          autoMinimize = !!parsed.autoMinimize;
+        }
       }
     } catch (err) {
       // ignore
@@ -108,6 +111,7 @@ export function saveProviderSettings() {
   parsed.lmStudioHost = lmStudioHost;
   parsed.ollamaAuth = ollamaAuth;
   parsed.lmStudioAuth = lmStudioAuth;
+  parsed.autoMinimize = autoMinimize;
 
   if (!parsed.provider) {
     parsed.provider = {};
@@ -132,6 +136,7 @@ let ollamaHost = 'http://localhost:11434';
 let lmStudioHost = 'http://localhost:1234';
 let ollamaAuth = '';
 let lmStudioAuth = '';
+let autoMinimize = false;
 
 // Load saved settings from settings file
 loadProviderSettings();
@@ -152,6 +157,9 @@ if (process.env.OLLAMA_AUTH) {
 if (process.env.LMSTUDIO_AUTH) {
   lmStudioAuth = process.env.LMSTUDIO_AUTH;
 }
+if (process.env.AUTO_MINIMIZE) {
+  autoMinimize = process.env.AUTO_MINIMIZE === 'true';
+}
 
 // Keep process.env in sync
 process.env.LLM_PROVIDER = llmProvider;
@@ -159,6 +167,17 @@ process.env.OLLAMA_HOST = ollamaHost;
 process.env.LMSTUDIO_HOST = lmStudioHost;
 process.env.OLLAMA_AUTH = ollamaAuth;
 process.env.LMSTUDIO_AUTH = lmStudioAuth;
+process.env.AUTO_MINIMIZE = String(autoMinimize);
+
+export function isAutoMinimizeEnabled() {
+  return autoMinimize;
+}
+
+export function setAutoMinimizeEnabled(enabled) {
+  autoMinimize = !!enabled;
+  process.env.AUTO_MINIMIZE = String(autoMinimize);
+  saveProviderSettings();
+}
 
 export function getLlmProvider() {
   return process.env.LLM_PROVIDER || llmProvider;

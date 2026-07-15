@@ -389,7 +389,7 @@ export function printHelp(topic) {
     return;
   }
 
-  console.log(pc.bold('\n📝 Available Chat Commands:'));
+  console.log(pc.bold('\nAvailable Chat Commands:'));
   console.log(`  ${pc.yellow('/help')}         - Display this detailed help menu.`);
   console.log(`  ${pc.yellow('/help piping')}  - Learn how to execute shell commands and pipe their output into prompts.`);
   console.log(`  ${pc.yellow('/help history')} - Learn how to view history and use interactive Ctrl+R search.`);
@@ -408,6 +408,7 @@ export function printHelp(topic) {
   console.log(`  ${pc.yellow('/add-plugin')}   - Interactive wizard to create and register a new JS plugin.`);
   console.log(`  ${pc.yellow('/sessions')}     - Open interactive dashboard to manage and fetch saved sessions.`);
   console.log(`  ${pc.yellow('/minimize')}     - Prune older conversation history to reduce active context size.`);
+  console.log(`  ${pc.yellow('/auto-minimize')} - Toggle auto-minimization of context after each turn (on/off).`);
   console.log(`  ${pc.yellow('/context')}      - Scan current folder and place a minimized local files index in the active context.`);
   console.log(`  ${pc.yellow('/history')}       - Display command and prompt history list.`);
   console.log(`  ${pc.yellow('/info')}         - Display current session diagnostics.`);
@@ -421,7 +422,7 @@ export function printHelp(topic) {
 }
 
 export function printTools(toolsList) {
-  console.log(pc.bold(pc.yellow('\n🛠️  Equipped Agent Tools:')));
+  console.log(pc.bold(pc.yellow('\nEquipped Agent Tools:')));
   Object.entries(toolsList).forEach(([name, toolObj]) => {
     console.log(`  • ${pc.bold(pc.magenta(name))}: ${toolObj.description}`);
   });
@@ -430,7 +431,7 @@ export function printTools(toolsList) {
 
 export function printToolCall(toolName, args) {
   const argsStr = Object.keys(args).length ? JSON.stringify(args) : 'no arguments';
-  console.log(pc.yellow(`🛠️  [Agent Tool Call] `) + pc.dim('Executing ') + pc.bold(pc.yellow(toolName)) + pc.dim(` with `) + pc.italic(argsStr));
+  console.log(pc.yellow(`[Agent Tool Call] `) + pc.dim('Executing ') + pc.bold(pc.yellow(toolName)) + pc.dim(` with `) + pc.italic(argsStr));
 }
 
 export function flattenObject(obj, prefix = '') {
@@ -757,9 +758,47 @@ export function formatChatResponse(text) {
   return renderedText;
 }
 
+export function resolveCarriageReturns(text) {
+  if (typeof text !== 'string') return text;
+  const lines = text.split(/\r?\n/);
+  const resolvedLines = lines.map(line => {
+    if (line.includes('\r')) {
+      const parts = line.split('\r');
+      for (let i = parts.length - 1; i >= 0; i--) {
+        if (parts[i].trim()) {
+          return parts[i];
+        }
+      }
+      return parts[parts.length - 1];
+    }
+    return line;
+  });
+  return resolvedLines.join('\n');
+}
+
 export function printToolResult(toolName, result) {
   let statusStr = result.success !== false ? pc.green('Success') : pc.red('Failed');
-  console.log(pc.blue(`📦 [Agent Tool Result] `) + pc.bold(pc.blue(toolName)) + ` completed with ` + statusStr);
+  console.log(pc.blue(`[Agent Tool Result] `) + pc.bold(pc.blue(toolName)) + ` completed with ` + statusStr);
+  
+  if (toolName === 'executeCommand' && typeof result === 'object' && result !== null) {
+    if (result.success === false) {
+      console.log(pc.red(`\nExit Code: ${result.exitCode ?? 'Failed'}`));
+    }
+    if (result.stdout && result.stdout.trim()) {
+      console.log(pc.green('\nStandard Output:'));
+      console.log(result.stdout);
+    }
+    if (result.stderr && result.stderr.trim()) {
+      console.log(pc.red('\nStandard Error:'));
+      console.log(result.stderr);
+    }
+    const statusMsg = result.success !== false
+      ? 'Command executed successfully.'
+      : (result.exitCode === -1 ? `Failed to start process.` : `Command failed with exit code ${result.exitCode}`);
+    console.log(pc.dim(`\nStatus: ${statusMsg}\n`));
+    return;
+  }
+
   if (result.success === false) {
     if (typeof result === 'object' && result !== null) {
       console.log(pc.red(`   Error: ${result.error || 'Failed'}`));
