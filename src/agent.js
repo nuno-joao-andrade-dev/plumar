@@ -320,7 +320,7 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
       }
     }
   } catch (err) {
-    if (abortSignal && abortSignal.aborted || err.name === 'AbortError') {
+    if (abortSignal && abortSignal.aborted) {
       throw new Error('Request cancelled by user (ESC)');
     }
     throw err;

@@ -1682,7 +1682,28 @@ export const tool = new FunctionTool({
           finalPrompt = `${pipeMatch.prompt}\n\n### Shell Output of \`${pipeMatch.command}\`:\n\`\`\`\n${shellOutput}\n\`\`\``;
         }
 
+        let sessionEvents = [];
+        try {
+          const session = await sessionService.getSession({
+            appName: 'plumar-cli',
+            userId: 'default-user',
+            sessionId: sessionId
+          });
+          if (session && session.events) {
+            sessionEvents = session.events;
+          }
+        } catch (e) {
+          // ignore
+        }
+
+        const sessionBytes = Buffer.byteLength(JSON.stringify(sessionEvents), 'utf8');
+        const sessionKb = sessionBytes / 1024;
+
         console.log(pc.dim(`\n🤖 Agent [${CHAT_MODES[activeMode].name}] is thinking & executing tools using ${activeModel}... (Press ESC to cancel)`));
+        if (sessionKb > 35 || sessionEvents.length >= 12) {
+          console.log(pc.dim(`   💡 ${pc.yellow('Tip:')} Your conversation context is getting large (${sessionKb.toFixed(1)} KB, ${sessionEvents.length} events).`));
+          console.log(pc.dim(`      If generation is slow, run the ${pc.yellow('/minimize')} command to prune and compress history.`));
+        }
 
         const { text, steps } = await runAgentTurn(sessionId, finalPrompt, activeModel, activeMode, controller.signal, activeTemperature, activeParameters);
 
@@ -1702,8 +1723,12 @@ export const tool = new FunctionTool({
 
       } catch (error) {
         console.log('\n');
-        if (controller.signal.aborted || error.message.includes('cancelled by user') || error.name === 'AbortError') {
+        if (controller.signal.aborted || error.message.includes('cancelled by user')) {
           console.log(pc.red(pc.bold('🛑 Request cancelled by user (ESC).\n')));
+        } else if (error.name === 'AbortError' || error.name === 'TimeoutError' || error.message.toLowerCase().includes('timeout')) {
+          console.error(pc.red(pc.bold('❌ Error executing agent turn:')));
+          console.error(pc.red(`   Request timed out or connection lost. The model failed to return content.`));
+          console.log(pc.yellow(`\n💡 Tip: Check if your local LLM server (Ollama/LM Studio) is running, responsive, and has enough resources to run model "${activeModel}".\n`));
         } else {
           console.error(pc.red(pc.bold('❌ Error executing agent turn:')));
           console.error(pc.red(`   ${error.message}`));
