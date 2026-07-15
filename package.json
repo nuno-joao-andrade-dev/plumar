@@ -1,6 +1,9 @@
 {
   "name": "plumar-cli",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=22"
+  },
   "description": "plumar-cli - A small agent chat app in the command line using Vercel AI SDK and Ollama",
   "author": "Nuno João Andrade",
   "license": "MIT",

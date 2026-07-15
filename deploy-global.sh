@@ -48,11 +48,17 @@ check_prerequisites() {
   print_info "Verifying system prerequisites..."
   
   if ! command -v node >/dev/null 2>&1; then
-    print_error "Node.js is not installed. Please install Node.js (v18+) to run plumar-cli."
+    print_error "Node.js is not installed. Please install Node.js (v22+) to run plumar-cli."
     exit 1
   fi
   NODE_VER=$(node -v)
-  print_success "Node.js is available: $NODE_VER"
+  # Extract major version number (e.g., 22 from v22.1.0)
+  NODE_MAJOR=$(echo "$NODE_VER" | tr -d 'v' | cut -d. -f1)
+  if [ "$NODE_MAJOR" -lt 22 ]; then
+    print_error "plumar-cli requires Node.js v22 or higher. Current version is: $NODE_VER"
+    exit 1
+  fi
+  print_success "Node.js is available: $NODE_VER (v22+ requirement met)"
 
   if ! command -v npm >/dev/null 2>&1; then
     print_error "npm is not installed. Please install npm to proceed."

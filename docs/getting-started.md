@@ -8,7 +8,7 @@ This guide walks you through setting up, configuring, and launching the **plumar
 
 Before starting, ensure you have the following installed on your system:
 
-- **Node.js** (v18.0.0 or higher)
+- **Node.js** (v22.0.0 or higher)
 - **npm** (v9.0.0 or higher)
 - **Ollama** (Runs local LLM models locally; make sure the Ollama daemon is running in the background)
 

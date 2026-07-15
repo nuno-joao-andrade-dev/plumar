@@ -149,7 +149,7 @@ The codebase has been refactored and organized to keep the root directory pristi
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
-Ensure you have **Node.js** (v18+) and **Ollama** installed on your host machine.
+Ensure you have **Node.js** (v22+) and **Ollama** installed on your host machine.
 
 ### 2. Pull Your Preferred Local Model
 Make sure your local Ollama instance is active and has your preferred LLM pulled (e.g., `gemma4`, `llama3`, `qwen2.5`, etc.). On startup, Plumar automatically discovers all installed tags and presents an interactive menu to let you choose:
@@ -195,13 +195,27 @@ You can deploy `plumar-cli` globally on your machine using the built-in global d
    *(or `plumar-cli`)*
 
 #### Option C: Direct Installation from GitHub 🌐
-If you don't have the source code cloned locally or want a quick one-step global installation straight from the official repository, you can install Plumar directly using `npm`:
 
+If you don't have the source code cloned locally and want a seamless, fully-automated one-step installation straight from the official repository, you can run the direct installer script.
+
+##### 1. Bash One-Liner (Recommended)
+This script will clone/update the Plumar repository to your home directory (`~/.plumar`), install all dependencies, and deploy the global commands:
+```bash
+curl -fsSL https://raw.githubusercontent.com/nuno-joao-andrade-dev/plumar/main/install.sh | bash
+```
+
+*Or, if you prefer `wget`:*
+```bash
+wget -qO- https://raw.githubusercontent.com/nuno-joao-andrade-dev/plumar/main/install.sh | bash
+```
+
+##### 2. Direct NPM Install (Alternative)
+Alternatively, you can install the package globally straight from the repository link using `npm`:
 ```bash
 npm install -g https://github.com/nuno-joao-andrade-dev/plumar
 ```
 
-This will fetch the code, install dependencies, and register the global `plumar` and `plumar-cli` commands. Once complete, you can start the application from any folder on your machine:
+Once complete, start the application from any folder on your machine:
 ```bash
 plumar
 ```
