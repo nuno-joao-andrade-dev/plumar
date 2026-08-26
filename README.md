@@ -325,6 +325,27 @@ To prevent path traversal and arbitrary host system files editing, plumar-cli en
 
 ---
 
+## 🔌 Controlling ADK Info Logging
+
+By default, internal verbose logging and telemetry from ADK (`@google/adk`) is **disabled** to keep the terminal REPL clean, concise, and focused on agent responses.
+
+### ⚙️ How to Toggle ADK Info Logs:
+1. **Startup CLI Flag**: Start the CLI with `--adk-info` or `--enable-adk-info` to enable internal ADK logging:
+   ```bash
+   npm start -- --adk-info
+   ```
+2. **Environment Variable**: Set `ADK_INFO=true` in your environment:
+   ```bash
+   ADK_INFO=true npm start
+   ```
+3. **Interactive REPL Command**: Toggle logging dynamically during a session by typing the slash command:
+   ```
+   /adk-info
+   ```
+4. **Diagnostics Verification**: View the current state of ADK logging using `/info` or `--info`.
+
+---
+
 ## 🧪 Running Tests
 
 The application includes a highly thorough unit and integration test suite targeting the AI agent model loops, sessions service, readline history restoration, dynamic piping, and tools sandboxing.
