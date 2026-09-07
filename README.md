@@ -1,4 +1,4 @@
-# 🤖 Plumar (plumar-cli) - Premium Agentic AI CLI Engine
+# Plumar (plumar-cli) - Premium Agentic AI CLI Engine
 
 An interactive, premium terminal-based AI Agent companion designed specifically for developers. Built in modern JavaScript (ESM) using the **Google Agent Development Kit (ADK)** and powered by local **Ollama**, Plumar dynamically discovers all models installed on your system—letting you select your preferred local LLM on startup or on-the-fly, and fully configure the active temperature, prompt profiles, and tool execution policies.
 
@@ -9,7 +9,7 @@ Plumar (also known as `plumar-cli`) comes fully equipped with a highly integrate
 
 ---
 
-## ✨ Features & Capabilities
+## Features & Capabilities
 
 ### 1. Interactive Terminal REPL
 *   **Persistent Prompt History**: When a session is loaded or resumed, your command history is reloaded into readline so that **Up/Down arrows** and **`Ctrl+R`** work out of the box.
@@ -37,11 +37,11 @@ Plumar (also known as `plumar-cli`) comes fully equipped with a highly integrate
 
 ---
 
-## 🛠️ Complete Workspace Tools Reference
+## Complete Workspace Tools Reference
 
 Plumar features **35 schema-validated workspace, diagnostic, and media tools**:
 
-### 📁 Safe Workspace Filesystem
+### Safe Workspace Filesystem
 | Tool Name | Description | Key Parameters |
 | :--- | :--- | :--- |
 | **`listFiles`** | Recursively maps workspace directory tree structure, ignoring dependency noise. | `directory` |
@@ -52,7 +52,7 @@ Plumar features **35 schema-validated workspace, diagnostic, and media tools**:
 | **`makeDirectory`** | Recursively creates new subdirectories inside the workspace boundaries. | `directoryPath` |
 | **`writeMarkdown`** | Generates highly structured Markdown files with headings, section blocks, and titles. | `filePath`, `title`, `sections` |
 
-### 💻 Development & System Operations
+### Development & System Operations
 | Tool Name | Description | Key Parameters |
 | :--- | :--- | :--- |
 | **`executeCommand`** | Safely executes terminal commands in the workspace with process timeouts. | `command` |
@@ -66,7 +66,7 @@ Plumar features **35 schema-validated workspace, diagnostic, and media tools**:
 | **`gitHelper`** | Retrieves repository status, logs, diffs, and drafts intelligent commits based on staged files. | `action` |
 | **`dbExplorer`** | Inspects schema details and runs zero-dependency custom queries on PostgreSQL/MySQL databases. | `connectionUri`, `action`, `sql` |
 
-### 🌐 Network, API & Load Testing
+### Network, API & Load Testing
 | Tool Name | Description | Key Parameters |
 | :--- | :--- | :--- |
 | **`fetchWebPage`** | Fetches textual content of public web URLs or REST APIs with HTML stripping and timeouts. | `url` |
@@ -74,7 +74,7 @@ Plumar features **35 schema-validated workspace, diagnostic, and media tools**:
 | **`restClient`** | Executes custom HTTP API requests (GET, POST, etc.) with custom headers and body. | `url`, `method`, `headers`, `body` |
 | **`apiPerformanceTest`**| Executes load and concurrent latency tests on any API endpoint, compiling latencies. | `url`, `method`, `requests` |
 
-### 📊 Data, Encryption & Media
+### Data, Encryption & Media
 | Tool Name | Description | Key Parameters |
 | :--- | :--- | :--- |
 | **`base64Convert`** | Encodes text/files to base64 or decodes base64 strings back to text/files. | `action`, `input` |
@@ -83,7 +83,7 @@ Plumar features **35 schema-validated workspace, diagnostic, and media tools**:
 | **`generateImage` (ALPHA)** | Procedurally draws and generates custom images (PNG/JPEG) offline using a local shape canvas. | `outputPath`, `prompt`, `width` |
 | **`generateVideo` (ALPHA)** | Generates custom video files using Google GenAI (Veo) model (with local fallback). | `outputPath`, `prompt` |
 
-### 🧠 Custom Skills, Plugins & Fun
+### Custom Skills, Plugins & Fun
 | Tool Name | Description | Key Parameters |
 | :--- | :--- | :--- |
 | **`listSkills`** | Lists all custom registered agentic skills currently loaded in the system. | *(none)* |
@@ -98,11 +98,11 @@ Plumar features **35 schema-validated workspace, diagnostic, and media tools**:
 
 ---
 
-## 👾 The plumar-cli Dino Game
+## The plumar-cli Dino Game
 
 A fully custom, high-fidelity browser game was designed and placed inside `dino-game/index.html`. It runs with pure client-side HTML, CSS, and Javascript.
 
-### 🌟 Game Features:
+### Game Features:
 *   **Deep Space Aesthetics**: Vibrant retro-neon color schemes with a glowing geometric T-Rex, scrolling procedural floors, and twinkling parallax-star backdrops.
 *   **Synthesized Audio FX**: Powered entirely by the **Web Audio API** (requires no external audio files). Generates nostalgic 8-bit sound waves for jumps, gravity flips, milestone high scores, and crashes.
 *   **Gravity Physics Modes**:
@@ -111,14 +111,14 @@ A fully custom, high-fidelity browser game was designed and placed inside `dino-
     3.  **Gravity Flip Mode**: Dino can run on the ceiling! Flip gravity upside-down on-the-fly.
 *   **Score & Stats Tracker**: Tracks real-time score, increases game speed as score rises, and saves high scores persistently to the browser's `localStorage` (keyed under `plumar_cli_high_score`).
 
-### 🎮 Game Controls:
+### Game Controls:
 *   **Jump / Glide Up**: `Space` or `↑ Arrow` (or click/tap on the screen)
 *   **Duck / Slam Down**: `↓ Arrow`
 *   **Flip Gravity**: `Shift` or `F`
 
 ---
 
-## 🛠️ Reorganized Project Architecture
+## Reorganized Project Architecture
 
 The codebase has been refactored and organized to keep the root directory pristine and modular:
 
@@ -146,7 +146,7 @@ The codebase has been refactored and organized to keep the root directory pristi
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Prerequisites
 Ensure you have **Node.js** (v22+) and **Ollama** installed on your host machine.
@@ -167,7 +167,7 @@ Install the project dependencies (done in the workspace root):
 npm install
 ```
 
-#### Option B: Global Installation (Use from Any Location) 🌟
+#### Option B: Global Installation (Use from Any Location)
 You can deploy `plumar-cli` globally on your machine using the built-in global deployment script. This allows you to run `plumar` or `plumar-cli` commands from any directory!
 
 1. Make sure you are in the project root directory.
@@ -194,7 +194,7 @@ You can deploy `plumar-cli` globally on your machine using the built-in global d
    ```
    *(or `plumar-cli`)*
 
-#### Option C: Direct Installation from GitHub 🌐
+#### Option C: Direct Installation from GitHub
 
 If you don't have the source code cloned locally and want a seamless, fully-automated one-step installation straight from the official repository, you can run the direct installer script.
 
@@ -228,7 +228,7 @@ npm start
 
 ---
 
-## 🎛️ Terminal Slash Commands
+## Terminal Slash Commands
 
 While in the interactive prompt, you can use special commands to manage your session:
 
@@ -257,7 +257,7 @@ While in the interactive prompt, you can use special commands to manage your ses
 | **`/context [dir]`**| Scan and index workspace directories recursively, appending the map to the active session. |
 | **`/exit` or `/quit`**| Safely terminate the chat session. |
 
-### 🎭 Customizing Chat Modes
+### Customizing Chat Modes
 
 You can customize the prompt profiles or define your own chat modes locally:
 1. Open the settings file at `./.plumar/settings.json` (created automatically on first run).
@@ -266,7 +266,7 @@ You can customize the prompt profiles or define your own chat modes locally:
    ```json
    "my-mode": {
      "name": "My Custom Mode",
-     "emoji": "🌟",
+     "emoji": "*",
      "description": "Your custom mode description",
      "temperature": 0.7,
      "systemPrompt": "You are a custom assistant..."
@@ -276,7 +276,7 @@ You can customize the prompt profiles or define your own chat modes locally:
 
 ---
 
-## 🔌 Configuring External MCP Servers
+## Configuring External MCP Servers
 
 You can configure external **Model Context Protocol (MCP)** servers to dynamically expand the agent's toolset. 
 
@@ -317,7 +317,7 @@ When you restart the CLI application, the new tools will automatically be availa
 
 ---
 
-## 🔒 Security Sandboxing (`resolveSafePath`)
+## Security Sandboxing (`resolveSafePath`)
 
 To prevent path traversal and arbitrary host system files editing, plumar-cli enforces rigid scoping rules:
 * Every filesystem operation resolves relative paths and fully sanitizes absolute paths using `resolveSafePath()`.
@@ -325,11 +325,11 @@ To prevent path traversal and arbitrary host system files editing, plumar-cli en
 
 ---
 
-## 🔌 Controlling ADK Info Logging
+## Controlling ADK Info Logging
 
 By default, internal verbose logging and telemetry from ADK (`@google/adk`) is **disabled** to keep the terminal REPL clean, concise, and focused on agent responses.
 
-### ⚙️ How to Toggle ADK Info Logs:
+### How to Toggle ADK Info Logs:
 1. **Startup CLI Flag**: Start the CLI with `--adk-info` or `--enable-adk-info` to enable internal ADK logging:
    ```bash
    npm start -- --adk-info
@@ -346,7 +346,7 @@ By default, internal verbose logging and telemetry from ADK (`@google/adk`) is *
 
 ---
 
-## 🧪 Running Tests
+## Running Tests
 
 The application includes a highly thorough unit and integration test suite targeting the AI agent model loops, sessions service, readline history restoration, dynamic piping, and tools sandboxing.
 
