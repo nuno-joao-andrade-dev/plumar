@@ -404,11 +404,11 @@ export const filesystemTools = {
 
   executeCommand: new FunctionTool({
     name: 'executeCommand',
-    description: 'Execute a terminal command within the workspace directory. Supports both synchronous commands (e.g. testing, building) and persistent background services (e.g. Node.js servers, Angular/React dev servers, watchers).',
+    description: 'Execute a terminal shell command within the workspace directory. Supports both synchronous commands (e.g. tests, linters, git, builds) and persistent background services (e.g. "node index.js", "ng serve", "npm start", "vite", API backends, or daemons).\n\nBACKGROUND PROCESS EXECUTION:\nTo launch persistent servers, long-running processes, or background daemons without hanging or blocking your turn, ALWAYS set background: true. The process will be detached, monitored by the process registry, and return immediately with its processId, PID, and initial startup logs. You can inspect logs or stop running processes anytime using processManager or portManager.',
     parameters: z.object({
-      command: z.string().describe('The shell command to execute, e.g. "npm run test", "node index.js", or "ng serve --open"'),
-      background: z.boolean().optional().default(false).describe('Set to true to run long-running servers or background tasks without blocking execution.'),
-      name: z.string().optional().describe('Optional friendly name or label when running in background (e.g. "backend", "frontend").')
+      command: z.string().describe('The shell command to execute (e.g. "npm test", "node server.js", "ng serve --open"). For long-running servers, always pair with background: true.'),
+      background: z.boolean().optional().default(false).describe('Set to true to run long-running servers, watchers, or daemons in the background without blocking execution. When true, returns immediately with processId, PID, and initial startup logs.'),
+      name: z.string().optional().describe('Optional descriptive label for the background service (e.g. "backend", "frontend", "api-server"). Used to track and manage the process.')
     }),
     execute: async ({ command, background = false, name }) => {
       if (background) {
