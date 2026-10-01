@@ -131,18 +131,25 @@ By default, internal verbose logging/telemetry from ADK (`@google/adk`) is **dis
 
 When models reason in their `<thinking>...</thinking>` block, they frequently map out tool invocations, shell setup commands (like `cd backend && node index.js` or `cd frontend && npm start`), and background processes. However, certain local models occasionally hallucinate that they have already started the background processes (e.g. printing `"I have executed the setup command... Status: The process full-stack-setup is running in the background (PID: 36569)"`) without emitting a native tool call.
 
-The **`executeThinking`** feature solves this through two powerful mechanisms:
-1. **Immediate Execution Toggle**: When enabled, Plumar directly extracts and dispatches tool calls and background shell commands planned during the thinking process.
-2. **Execution Hallucination Auto-Recovery**: Even when the toggle is off, Plumar detects when a model hallucinates running background servers or setup steps, extracting and executing the actual background commands from the conversation context and reasoning.
+The **`executeThinking`** feature solves this through three powerful mechanisms:
+1. **Model Thinking Process Refeed (`/refeed` & Auto-Refeed)**: Instead of relying on brittle regexes, Plumar re-feeds the model's `<thinking>` plan directly back to the model with an explicit tool execution prompt (`<thinking_process_plan>`), prompting the agent to invoke the necessary tools (`executeCommand`, `writeFile`, `makeDirectory`, `codeFixer`, etc.) step-by-step to complete the plan.
+2. **Context Memory Preservation**: Plumar preserves `<thinking>...</thinking>` content inside assistant message history across turns in `adkContentsToOllamaMessages`, guaranteeing that the LLM has complete memory of its previous thoughts and plans during subsequent turns or refeeds.
+3. **Execution Hallucination Auto-Recovery**: Plumar detects when a model hallucinates running background servers or setup steps without emitting native tool calls, automatically re-feeding the thinking plan for immediate tool execution.
 
 ### ⚙️ How to Toggle & Control Execute Thinking:
 1. **Interactive REPL Command**:
+   - Refeed previous turn's thinking plan to model:
+     ```bash
+     /refeed
+     ```
+     *(or `/execute-thinking run`)*
+   - Conversational refeed prompt: Type `"refeed"`, `"execute the plan"`, or `"execute the thinking process"` directly in chat.
    - Toggle on/off: `/execute-thinking` (or `/thinking-execute`)
    - Turn on explicitly: `/execute-thinking on`
    - Turn off explicitly: `/execute-thinking off`
-   - Execute previous turn's thinking immediately on-demand:
+   - Execute direct offline tool extraction:
      ```bash
-     /execute-thinking run
+     /execute-thinking direct
      ```
 2. **Via Settings Slash Command**:
    ```bash
