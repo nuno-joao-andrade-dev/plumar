@@ -1100,9 +1100,6 @@ async function main() {
         // ignore
       }
 
-      // Display top lines monitor of background processes still alive
-      printBackgroundProcessesMonitor();
-
       if (process.stdout.isTTY) {
         try {
           const alive = getAliveBackgroundProcesses();
@@ -1117,6 +1114,9 @@ async function main() {
       // Ask user for input
       const userInput = await rl.question(pc.green(pc.bold('You › ')));
       const trimmedInput = userInput.trim();
+
+      // Display monitor of background processes still alive below the prompt
+      printBackgroundProcessesMonitor();
 
       // Skip empty messages
       if (!trimmedInput) {

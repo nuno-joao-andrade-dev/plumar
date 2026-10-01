@@ -10,7 +10,7 @@ This file outlines the complete set of instructions provided during our session,
 2. **Rebranding**: Change the Dino Game's name and styling references from **"Antigravity Dino"** to **"plumar-cli Dino"**.
 3. **ADK Info Toggle**: Allow the user to enable/disable info (internal logging) from ADK (`@google/adk`), which should be disabled by default.
 4. **Immediate Thinking Process Execution Toggle (`executeThinking`)**: Allow the user to toggle immediate execution of the model's `<thinking>` process, automatically extracting and dispatching tool calls and background setup commands. Includes auto-recovery for execution hallucinations where models claim they started background processes without emitting a native tool call.
-5. **Always Background `executeCommand` & Live Top Lines Monitor**: All shell commands executed via `executeCommand` always run in the background without blocking the agent turn. The console dynamically monitors all alive background processes in the top lines directly above the user prompt and inside the status card (`printStatus`).
+5. **Always Background `executeCommand` & Live Process Monitor**: All shell commands executed via `executeCommand` always run in the background without blocking the agent turn. The console dynamically monitors all alive background processes directly below the user prompt and inside the status card (`printStatus`).
 6. **Background Process Management (`/processes` or `/ps`)**: Added interactive slash commands to inspect, monitor recent logs, and stop active background services.
 
 ---
@@ -22,7 +22,7 @@ The plumar-cli environment now features a robust suite of **21 core tools** to a
 ### 🔌 1. Coding & Terminal Utilities (Core Workflow)
 | Tool Name | Description | Key Parameters |
 | :--- | :--- | :--- |
-| **`executeCommand`** 🆕 | Always executes terminal commands in the workspace in the background without blocking or hanging the assistant turn. Processes are registered in the background process manager and monitored live in the top lines of the console. | `command` (e.g., `"npm run test"`), `background` (boolean, default: `true`), `name` (string) |
+| **`executeCommand`** 🆕 | Always executes terminal commands in the workspace in the background without blocking or hanging the assistant turn. Processes are registered in the background process manager and monitored live below the prompt. | `command` (e.g., `"npm run test"`), `background` (boolean, default: `true`), `name` (string) |
 | **`searchReplace`** 🆕 | Finds a specific text block inside any file and replaces it with a new block, ensuring safe precise modifications. | `filePath`, `findText`, `replaceText` |
 | **`searchGrep`** | Performs a robust text search or Regex match across all files in the workspace (automatically ignoring ignored directories). | `query`, `directory`, `isRegex` |
 
