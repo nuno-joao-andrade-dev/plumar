@@ -1286,4 +1286,73 @@ test('20. Loop and Duplicate Execution Safeguards', async (t) => {
   });
 });
 
+test('21. Process Manager and Background Process Execution', async (t) => {
+  let startedProcId = null;
+
+  await t.test('processManager start: should launch long-running process in background', async () => {
+    const res = await tools.processManager.execute({
+      action: 'start',
+      command: 'node -e "console.log(\'server started\'); setInterval(() => console.log(\'tick\'), 1000)"',
+      name: 'test-server'
+    });
+
+    assert.strictEqual(res.success, true);
+    assert.ok(res.processId);
+    assert.strictEqual(res.name, 'test-server');
+    assert.strictEqual(res.status, 'running');
+    assert.ok(res.pid > 0);
+    startedProcId = res.processId;
+  });
+
+  await t.test('processManager list: should list running background processes', async () => {
+    const res = await tools.processManager.execute({ action: 'list' });
+    assert.strictEqual(res.success, true);
+    assert.ok(res.count >= 1);
+    const found = res.processes.find(p => p.id === startedProcId);
+    assert.ok(found);
+    assert.strictEqual(found.name, 'test-server');
+    assert.strictEqual(found.status, 'running');
+  });
+
+  await t.test('processManager logs: should retrieve recent output from background process', async () => {
+    const res = await tools.processManager.execute({
+      action: 'logs',
+      processId: startedProcId,
+      lines: 10
+    });
+    assert.strictEqual(res.success, true);
+    assert.strictEqual(res.processId, startedProcId);
+    assert.match(res.logs, /server started/i);
+  });
+
+  await t.test('processManager stop: should gracefully terminate background process', async () => {
+    const res = await tools.processManager.execute({
+      action: 'stop',
+      processId: startedProcId
+    });
+    assert.strictEqual(res.success, true);
+    assert.strictEqual(res.status, 'stopped');
+
+    const listRes = await tools.processManager.execute({ action: 'list' });
+    const found = listRes.processes.find(p => p.id === startedProcId);
+    assert.strictEqual(found.status, 'stopped');
+  });
+
+  await t.test('executeCommand: should launch background process when background: true is set', async () => {
+    const res = await tools.executeCommand.execute({
+      command: 'node -e "console.log(\'bg command started\'); setInterval(() => {}, 1000)"',
+      background: true,
+      name: 'bg-command-test'
+    });
+
+    assert.strictEqual(res.success, true);
+    assert.ok(res.processId);
+    assert.strictEqual(res.status, 'running');
+
+    // Clean up
+    await tools.processManager.execute({ action: 'stop', processId: res.processId });
+  });
+});
+
+
 

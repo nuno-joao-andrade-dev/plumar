@@ -4,8 +4,52 @@ import fs from 'fs/promises';
 import path from 'path';
 import { exec } from 'child_process';
 import { resolveSafePath, WORKSPACE_DIR } from './core-helper.js';
+import {
+  startBackgroundProcess,
+  listBackgroundProcesses,
+  getBackgroundProcessLogs,
+  stopBackgroundProcess
+} from './process-registry.js';
 
 export const developmentTools = {
+  processManager: new FunctionTool({
+    name: 'processManager',
+    description: 'Manage long-running background processes and services (e.g. Node.js backend servers, Angular/React/Vite development servers, databases, watchers). Supports starting, listing, reading logs, and stopping background services.',
+    parameters: z.object({
+      action: z.enum(['start', 'list', 'logs', 'stop']).describe('The action to perform: "start" to launch a background service, "list" to list active services, "logs" to read recent stdout/stderr output, "stop" to terminate a service.'),
+      command: z.string().optional().describe('The shell command to execute in the background (required for "start", e.g. "node index.js" or "ng serve --open").'),
+      name: z.string().optional().describe('A friendly name or label for the process (e.g. "backend", "frontend", "api-server").'),
+      processId: z.string().optional().describe('The process ID to inspect or stop (e.g. "proc-1").'),
+      pid: z.number().int().optional().describe('Process ID to inspect or stop.'),
+      lines: z.number().int().optional().default(50).describe('Number of recent log lines to retrieve (for "logs" action, default 50).'),
+      cwd: z.string().optional().describe('Optional working directory relative to workspace.'),
+    }),
+    execute: async ({ action, command, name, processId, pid, lines = 50, cwd }) => {
+      try {
+        if (action === 'start') {
+          if (!command) {
+            return { success: false, error: 'Command is required for "start" action.' };
+          }
+          return await startBackgroundProcess({ command, name, cwd });
+        } else if (action === 'list') {
+          const procs = listBackgroundProcesses();
+          return {
+            success: true,
+            count: procs.length,
+            processes: procs
+          };
+        } else if (action === 'logs') {
+          return await getBackgroundProcessLogs({ processId, name, pid, lines });
+        } else if (action === 'stop') {
+          return await stopBackgroundProcess({ processId, name, pid });
+        }
+        return { success: false, error: `Unknown action: "${action}"` };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }
+  }),
+
   portManager: new FunctionTool({
     name: 'portManager',
     description: 'Query processes running on a specific port or terminate a process by port number or PID.',

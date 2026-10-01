@@ -56,7 +56,8 @@ Plumar features **37 schema-validated workspace, diagnostic, and media tools**:
 ### Development & System Operations
 | Tool Name | Description | Key Parameters |
 | :--- | :--- | :--- |
-| **`executeCommand`** | Safely executes terminal commands in the workspace with process timeouts. | `command` |
+| **`processManager`** | Starts, monitors, inspects logs of, and terminates persistent background services (Node.js servers, Angular/React dev servers, watchers). | `action`, `command`, `name`, `processId`, `pid`, `lines` |
+| **`executeCommand`** | Executes terminal commands in the workspace with process timeouts; supports long-running background tasks via `background: true`. | `command`, `background`, `name` |
 | **`searchReplace`** | Finds and replaces a specific exact text block inside a file. | `filePath`, `findText`, `replaceText` |
 | **`searchGrep`** | Runs ripgrep-like search or Regex matching across files in the workspace. | `query`, `directory`, `isRegex` |
 | **`findFiles`** | Recursively finds files matching glob/wildcard patterns (e.g., `*.json`). | `pattern`, `directory` |

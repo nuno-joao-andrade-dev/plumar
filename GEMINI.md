@@ -19,7 +19,7 @@ The plumar-cli environment now features a robust suite of **21 core tools** to a
 ### 🔌 1. Coding & Terminal Utilities (Core Workflow)
 | Tool Name | Description | Key Parameters |
 | :--- | :--- | :--- |
-| **`executeCommand`** 🆕 | Safely executes terminal commands in the workspace with a standard 30s timeout and detailed stdout/stderr capturing. | `command` (e.g., `"npm run test"`) |
+| **`executeCommand`** 🆕 | Safely executes terminal commands in the workspace with stdout/stderr capturing. Supports both synchronous commands and persistent background services (`background: true`). | `command` (e.g., `"npm run test"`), `background` (boolean), `name` (string) |
 | **`searchReplace`** 🆕 | Finds a specific text block inside any file and replaces it with a new block, ensuring safe precise modifications. | `filePath`, `findText`, `replaceText` |
 | **`searchGrep`** | Performs a robust text search or Regex match across all files in the workspace (automatically ignoring ignored directories). | `query`, `directory`, `isRegex` |
 
@@ -56,6 +56,7 @@ The plumar-cli environment now features a robust suite of **21 core tools** to a
 ### 🔌 5. Advanced Developer Utilities (Database, Process, Git & Linter Tools) 🆕
 | Tool Name | Description | Key Parameters |
 | :--- | :--- | :--- |
+| **`processManager`** 🆕 | Starts, monitors, inspects logs of, and terminates persistent background services (Node.js servers, Angular/React dev servers, watchers). | `action` (`"start"` \| `"list"` \| `"logs"` \| `"stop"`), `command`, `name`, `processId`, `pid`, `lines` |
 | **`portManager`** 🆕 | Query processes active on a network port, or terminate a process by port or PID to resolve port-in-use blocks. | `action` (`"list"` \| `"kill"`), `port`, `pid` |
 | **`restClient`** 🆕 | Constructs and executes custom HTTP API requests (GET, POST, PUT, DELETE, PATCH) to test external REST interfaces with timing stats, custom headers, and bodies. | `url`, `method`, `headers`, `body` |
 | **`regexHelper`** 🆕 | Evaluates, matches, or replaces text strings using high-performance regular expressions with customizable flags. | `action` (`"test"` \| `"match"` \| `"replace"`), `pattern`, `flags`, `text`, `replacement` |

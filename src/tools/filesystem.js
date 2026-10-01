@@ -4,6 +4,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { exec, spawn } from 'child_process';
 import { resolveSafePath, WORKSPACE_DIR } from './core-helper.js';
+import { startBackgroundProcess } from './process-registry.js';
 
 export const filesystemTools = {
   listFiles: new FunctionTool({
@@ -403,11 +404,17 @@ export const filesystemTools = {
 
   executeCommand: new FunctionTool({
     name: 'executeCommand',
-    description: 'Execute a terminal command within the workspace directory. Useful for building, testing, or running workspace code.',
+    description: 'Execute a terminal command within the workspace directory. Supports both synchronous commands (e.g. testing, building) and persistent background services (e.g. Node.js servers, Angular/React dev servers, watchers).',
     parameters: z.object({
-      command: z.string().describe('The shell command to execute, e.g. "npm run test" or "node index.js"'),
+      command: z.string().describe('The shell command to execute, e.g. "npm run test", "node index.js", or "ng serve --open"'),
+      background: z.boolean().optional().default(false).describe('Set to true to run long-running servers or background tasks without blocking execution.'),
+      name: z.string().optional().describe('Optional friendly name or label when running in background (e.g. "backend", "frontend").')
     }),
-    execute: async ({ command }) => {
+    execute: async ({ command, background = false, name }) => {
+      if (background) {
+        return await startBackgroundProcess({ command, name });
+      }
+
       const resolveCarriageReturnsLocal = (text) => {
         if (typeof text !== 'string') return text;
         const lines = text.split(/\r?\n/);
