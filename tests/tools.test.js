@@ -4,6 +4,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { tools } from '../src/tools.js';
 import { Jimp } from 'jimp';
+import { wrapFunctionTool, resetTurnToolHistory } from '../src/policy-manager.js';
+import { detectAndParseTextToolCalls } from '../src/ollama-client.js';
 
 test('1. calculator tool', async (t) => {
   await t.test('should evaluate simple math expression', async () => {
@@ -1174,3 +1176,114 @@ test('18. Multi-modal and OCR Tools', async (t) => {
     assert.match(res.error, /ENOENT/);
   });
 });
+
+test('19. Binary Writing and 3D Mesh Generation Tools', async (t) => {
+  await t.test('writeBinaryFile: should write valid base64 data as a binary file to disk', async () => {
+    const tempFile = 'temp_binary_test.bin';
+    try {
+      const data = 'Hello Binary!';
+      const base64Data = Buffer.from(data, 'utf-8').toString('base64');
+      
+      const res = await tools.writeBinaryFile.execute({
+        filePath: tempFile,
+        content: base64Data,
+        encoding: 'base64'
+      });
+      assert.deepStrictEqual(res.success, true);
+      assert.strictEqual(res.sizeBytes, data.length);
+
+      const content = await fs.readFile(tempFile, 'utf-8');
+      assert.strictEqual(content, data);
+    } finally {
+      try {
+        await fs.unlink(tempFile);
+      } catch {}
+    }
+  });
+
+  await t.test('generate3DModel: should procedurally fallback and generate a 3D OBJ file and save it', async () => {
+    const tempObjFile = 'temp_3d_cube.obj';
+    try {
+      const res = await tools.generate3DModel.execute({
+        prompt: 'a low-poly cube',
+        outputPath: tempObjFile
+      });
+      assert.deepStrictEqual(res.success, true);
+      assert.strictEqual(res.outputPath, tempObjFile);
+      assert.ok(res.sizeBytes > 0);
+
+      const content = await fs.readFile(tempObjFile, 'utf-8');
+      assert.match(content, /^v\s+[-0-9\.]+/m);
+      assert.match(content, /^f\s+\d+/m);
+    } finally {
+      try {
+        await fs.unlink(tempObjFile);
+      } catch {}
+    }
+  });
+});
+
+test('20. Loop and Duplicate Execution Safeguards', async (t) => {
+  await t.test('wrapFunctionTool: should prevent duplicate identical writeFile in same turn', async () => {
+    resetTurnToolHistory();
+    const wrappedWriteFile = wrapFunctionTool(tools.writeFile);
+    const testFile = 'temp_loop_test.txt';
+
+    try {
+      // First invocation should succeed normally
+      const res1 = await wrappedWriteFile.execute({ filePath: testFile, content: 'hello loop' });
+      assert.strictEqual(res1.success, true);
+      assert.strictEqual(res1.cached, undefined);
+
+      // Second identical invocation should be caught by duplicate detector
+      const res2 = await wrappedWriteFile.execute({ filePath: testFile, content: 'hello loop' });
+      assert.strictEqual(res2.success, true);
+      assert.strictEqual(res2.cached, true);
+      assert.match(res2.message, /already completed successfully/i);
+
+      // Third identical invocation should trigger loop detection and block
+      const res3 = await wrappedWriteFile.execute({ filePath: testFile, content: 'hello loop' });
+      assert.strictEqual(res3.success, false);
+      assert.strictEqual(res3.loopDetected, true);
+      assert.match(res3.error, /Loop prevention triggered/i);
+    } finally {
+      try {
+        await fs.unlink(testFile);
+      } catch {}
+      resetTurnToolHistory();
+    }
+  });
+
+  await t.test('resetTurnToolHistory: should reset history between turns', async () => {
+    resetTurnToolHistory();
+    const wrappedWriteFile = wrapFunctionTool(tools.writeFile);
+    const testFile = 'temp_loop_test_reset.txt';
+
+    try {
+      const res1 = await wrappedWriteFile.execute({ filePath: testFile, content: 'test reset' });
+      assert.strictEqual(res1.success, true);
+      assert.strictEqual(res1.cached, undefined);
+
+      // Reset turn history (as done at the start of every turn)
+      resetTurnToolHistory();
+
+      // Should execute cleanly again
+      const res2 = await wrappedWriteFile.execute({ filePath: testFile, content: 'test reset' });
+      assert.strictEqual(res2.success, true);
+      assert.strictEqual(res2.cached, undefined);
+    } finally {
+      try {
+        await fs.unlink(testFile);
+      } catch {}
+      resetTurnToolHistory();
+    }
+  });
+
+  await t.test('detectAndParseTextToolCalls: should NOT treat [Agent Tool Call: Executed ...] as a new tool call', async () => {
+    const historicalLog = 'Previous output:\n[Agent Tool Call: Executed "writeFile" with args: {"filePath": "test.txt", "content": "foo"}]\nFile has been written.';
+    const parsed = detectAndParseTextToolCalls(historicalLog);
+    assert.strictEqual(parsed.calls.length, 0);
+  });
+});
+
+

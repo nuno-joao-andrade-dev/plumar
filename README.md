@@ -39,7 +39,7 @@ Plumar (also known as `plumar-cli`) comes fully equipped with a highly integrate
 
 ## Complete Workspace Tools Reference
 
-Plumar features **35 schema-validated workspace, diagnostic, and media tools**:
+Plumar features **37 schema-validated workspace, diagnostic, and media tools**:
 
 ### Safe Workspace Filesystem
 | Tool Name | Description | Key Parameters |
@@ -47,6 +47,7 @@ Plumar features **35 schema-validated workspace, diagnostic, and media tools**:
 | **`listFiles`** | Recursively maps workspace directory tree structure, ignoring dependency noise. | `directory` |
 | **`readFile`** | Reads plain-text files with automatic 10,000-character safety truncation. | `filePath` |
 | **`writeFile`** | Safely writes and overwrites workspace plain-text files with automatic parent directory creation. | `filePath`, `content` |
+| **`writeBinaryFile`** | Creates a new binary file or overwrites an existing one with base64/hex content. | `filePath`, `content`, `encoding` |
 | **`appendFile`** | Appends plain text content to the end of a file (creates if missing). | `filePath`, `content` |
 | **`deleteFile`** | Safely removes a file from the workspace filesystem. | `filePath` |
 | **`makeDirectory`** | Recursively creates new subdirectories inside the workspace boundaries. | `directoryPath` |
@@ -82,6 +83,7 @@ Plumar features **35 schema-validated workspace, diagnostic, and media tools**:
 | **`generateHash`** | Computes cryptographic hashes (MD5, SHA-1, SHA-256) of strings or files. | `action`, `input` |
 | **`generateImage` (ALPHA)** | Procedurally draws and generates custom images (PNG/JPEG) offline using a local shape canvas. | `outputPath`, `prompt`, `width` |
 | **`generateVideo` (ALPHA)** | Generates custom video files using Google GenAI (Veo) model (with local fallback). | `outputPath`, `prompt` |
+| **`generate3DModel`** | Generates a 3D Wavefront OBJ model using LLaMA-Mesh or local fallback models, and saves it using `writeBinaryFile`. | `prompt`, `outputPath`, `modelName` |
 
 ### Custom Skills, Plugins & Fun
 | Tool Name | Description | Key Parameters |
@@ -225,6 +227,28 @@ If you opted for local installation, start the interactive CLI session from the 
 ```bash
 npm start
 ```
+
+### 5. Non-Interactive Command-Line Modes (Direct Mode & Quiet Mode)
+Plumar can also be run directly from any terminal to execute a single prompt and exit, skipping the interactive setup menus and REPL loop. This is incredibly powerful for shell scripts, aliases, or piping text between tools.
+
+#### Direct CLI Prompting
+Simply pass your natural language prompt as positional arguments:
+```bash
+plumar write a Python function to reverse a string
+```
+
+#### Specifying Model & Temperature
+Customize the model or temperature dynamically on-the-fly:
+```bash
+plumar -m gemma2:2b -t 0.2 "write a 1-sentence welcome greeting"
+```
+
+#### Quiet / Raw Output Mode (`--quiet` / `-q` or `--raw` / `-r`)
+Use the quiet mode flag to completely silence connecting logs, model headers, thinking steps, and response prefixes, outputting **only the raw final response text**:
+```bash
+plumar -q "say Hello World in 3 words" | tr 'a-z' 'A-Z'
+```
+This is perfect for piping outputs directly into other command-line applications!
 
 ---
 

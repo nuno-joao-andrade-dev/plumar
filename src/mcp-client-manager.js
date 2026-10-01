@@ -179,7 +179,9 @@ export async function loadAndStartMcpServers() {
       continue;
     }
 
-    process.stderr.write(`🔌 Connecting to MCP Server "${serverName}"...\n`);
+    if (process.env.PLUMAR_QUIET !== 'true') {
+      process.stderr.write(`🔌 Connecting to MCP Server "${serverName}"...\n`);
+    }
     
     const client = new McpClient(serverName, serverConfig);
     const startPromise = client.start()
@@ -252,10 +254,14 @@ export async function loadAndStartMcpServers() {
             }
           });
         }
-        process.stderr.write(`Connected to MCP Server "${serverName}". Registered ${client.tools.length} tools.\n`);
+        if (process.env.PLUMAR_QUIET !== 'true') {
+          process.stderr.write(`Connected to MCP Server "${serverName}". Registered ${client.tools.length} tools.\n`);
+        }
       })
       .catch((err) => {
-        process.stderr.write(`Connection to MCP Server "${serverName}" failed: ${err.message}\n`);
+        if (process.env.PLUMAR_QUIET !== 'true') {
+          process.stderr.write(`Connection to MCP Server "${serverName}" failed: ${err.message}\n`);
+        }
       });
 
     loadPromises.push(startPromise);

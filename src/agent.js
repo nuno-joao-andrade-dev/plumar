@@ -41,7 +41,8 @@ import {
   getToolPolicy,
   getAllToolPolicies,
   checkToolPermission,
-  wrapFunctionTool
+  wrapFunctionTool,
+  resetTurnToolHistory
 } from './policy-manager.js';
 
 import {
@@ -96,6 +97,7 @@ export {
   getToolPolicy,
   getAllToolPolicies,
   checkToolPermission,
+  resetTurnToolHistory,
   getSessionTokens,
   resetSessionTokens,
   CHAT_MODES,
@@ -238,6 +240,10 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
 3. **USE readAndSendImage FOR DESCRIPTION / ANALYSIS**: To ask questions, describe, or analyze an image, call the \`readAndSendImage\` tool with the path to the image and your specific question or prompt.
 `;
 
+  // Append current active working directory (cwd) context so that the model knows where it is running
+  const currentDirectory = process.cwd();
+  systemPrompt += `\n\n### Current Workspace Directory Context\nYour current working directory/folder is: "${currentDirectory}". Unless the user specifies an absolute path or a different target directory, all files generated, updated, or created should be written relative to this directory. Always pass relative paths (e.g. "model.obj" or "./model.obj") to filesystem and media tools to save them in this directory.`;
+
   // Append standard tools reference for text-fallback
   systemPrompt += '\n\n' + formatToolsForPrompt(tools);
 
@@ -284,8 +290,12 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
     throw new Error('Request cancelled by user (ESC)');
   }
 
+  resetTurnToolHistory();
+
   let finalResponseText = '';
   const steps = [];
+  let toolStepCount = 0;
+  const MAX_TOOL_STEPS_PER_TURN = 15;
 
   try {
     // 5. Run the conversational turn, collecting thought and content events
@@ -297,6 +307,12 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
       if (abortSignal && abortSignal.aborted) {
         throw new Error('Request cancelled by user (ESC)');
       }
+
+      // Track tool execution steps to guard against runaway loops
+      if (getFunctionResponses(event).length > 0) {
+        toolStepCount++;
+      }
+
       if (event.content && Array.isArray(event.content.parts)) {
         const thoughtParts = [];
         let textVal = '';
@@ -321,6 +337,14 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
         if (textVal) {
           finalResponseText += textVal;
         }
+      }
+
+      if (toolStepCount >= MAX_TOOL_STEPS_PER_TURN) {
+        console.log(pc.yellow(`\n⚠️ Maximum tool execution limit (${MAX_TOOL_STEPS_PER_TURN} steps) reached for this turn to prevent runaway loops.`));
+        if (!finalResponseText.trim()) {
+          finalResponseText = `Operations completed (stopped after reaching maximum limit of ${MAX_TOOL_STEPS_PER_TURN} tool steps).`;
+        }
+        break;
       }
     }
   } catch (err) {

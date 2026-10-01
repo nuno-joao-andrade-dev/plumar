@@ -34,7 +34,7 @@ Example:
   }
 }
 \`\`\`
-Only use registered tools. Do not output anything else inside the code block.
+Only use registered tools. Do not output anything else inside the code block. Once a tool has been executed and its result returned, DO NOT output the tool call JSON block again. Instead, summarize what was done for the user in plain text.
 `
   },
   code: {
@@ -75,7 +75,7 @@ Example:
   }
 }
 \`\`\`
-Only use registered tools. Do not output anything else inside the code block.
+Only use registered tools. Do not output anything else inside the code block. Once a tool has been executed and its result returned, DO NOT output the tool call JSON block again. Instead, summarize what was done for the user in plain text.
 `
   },
   system: {
@@ -103,7 +103,7 @@ Example:
   }
 }
 \`\`\`
-Only use registered tools. Do not output anything else inside the code block.
+Only use registered tools. Do not output anything else inside the code block. Once a tool has been executed and its result returned, DO NOT output the tool call JSON block again. Instead, summarize what was done for the user in plain text.
 `
   },
   creative: {
@@ -130,7 +130,7 @@ Example:
   }
 }
 \`\`\`
-Only use registered tools. Do not output anything else inside the code block.
+Only use registered tools. Do not output anything else inside the code block. Once a tool has been executed and its result returned, DO NOT output the tool call JSON block again. Instead, summarize what was done for the user in plain text.
 `
   }
 };

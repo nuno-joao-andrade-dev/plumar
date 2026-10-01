@@ -581,6 +581,265 @@ async function main() {
     process.stderr.write(`Failed to initialize persistent sessions: ${err.message}\n`);
   }
 
+  // 1.8. Check for direct command-line execution (Prompt Mode)
+  const isQuiet = process.argv.includes('--quiet') || 
+                  process.argv.includes('-q') || 
+                  process.argv.includes('--raw') || 
+                  process.argv.includes('-r');
+
+  if (isQuiet) {
+    process.env.PLUMAR_QUIET = 'true';
+  }
+
+  const flagsWithArgs = [
+    '--policy-config',
+    '--host', '--ollama-host', '--endpoint', '--ollama-endpoint',
+    '--policy-default',
+    '--prompt', '-p',
+    '--model', '-m',
+    '--temperature', '-t'
+  ];
+
+  let promptParts = [];
+  let explicitPrompt = null;
+  let explicitModel = null;
+  let explicitTemperature = null;
+
+  for (let i = 2; i < process.argv.length; i++) {
+    const arg = process.argv[i];
+
+    if (flagsWithArgs.includes(arg)) {
+      if (arg === '--prompt' || arg === '-p') {
+        if (i + 1 < process.argv.length) {
+          explicitPrompt = process.argv[i + 1];
+        }
+      } else if (arg === '--model' || arg === '-m') {
+        if (i + 1 < process.argv.length) {
+          explicitModel = process.argv[i + 1];
+        }
+      } else if (arg === '--temperature' || arg === '-t') {
+        if (i + 1 < process.argv.length) {
+          const parsed = parseFloat(process.argv[i + 1]);
+          if (!isNaN(parsed)) explicitTemperature = parsed;
+        }
+      }
+      i++; // Skip argument value
+      continue;
+    }
+
+    if (arg.startsWith('--prompt=')) {
+      explicitPrompt = arg.split('=')[1];
+      continue;
+    }
+    if (arg.startsWith('-p=')) {
+      explicitPrompt = arg.split('=')[1];
+      continue;
+    }
+    if (arg.startsWith('--model=')) {
+      explicitModel = arg.split('=')[1];
+      continue;
+    }
+    if (arg.startsWith('-m=')) {
+      explicitModel = arg.split('=')[1];
+      continue;
+    }
+    if (arg.startsWith('--temperature=')) {
+      const parsed = parseFloat(arg.split('=')[1]);
+      if (!isNaN(parsed)) explicitTemperature = parsed;
+      continue;
+    }
+    if (arg.startsWith('-t=')) {
+      const parsed = parseFloat(arg.split('=')[1]);
+      if (!isNaN(parsed)) explicitTemperature = parsed;
+      continue;
+    }
+
+    if (arg.startsWith('-')) {
+      if (arg.startsWith('--policy-')) {
+        const parts = arg.slice(9).split('=');
+        if (parts.length === 1 && i + 1 < process.argv.length && !process.argv[i + 1].startsWith('-')) {
+          i++; // Skip the policy value
+        }
+      }
+      continue;
+    }
+
+    promptParts.push(arg);
+  }
+
+  const finalCommandLinePrompt = explicitPrompt || promptParts.join(' ').trim();
+
+  if (finalCommandLinePrompt) {
+    // Direct 3D Mesh Generation Mode Interceptor
+    const modelLower = (explicitModel || '').toLowerCase();
+    const is3DModel = modelLower.includes('mesh') || modelLower.includes('trellis') || finalCommandLinePrompt.toLowerCase().includes('llama-mesh');
+    
+    if (is3DModel) {
+      if (!isQuiet) {
+        console.log(pc.yellow(`\n📦 Direct 3D Mesh Generation Mode detected for model: "${explicitModel || 'llama-mesh'}"`));
+      }
+      
+      let outputPath = 'model.obj';
+      let promptText = finalCommandLinePrompt;
+      
+      const saveInMatch = finalCommandLinePrompt.match(/(?:save it in|save in|save as|save to|to|output to)\s+([\S]+)/i);
+      if (saveInMatch) {
+        outputPath = saveInMatch[1].replace(/['"]/g, '');
+        promptText = finalCommandLinePrompt.replace(saveInMatch[0], '').trim();
+      }
+      
+      promptText = promptText.replace(/\s+and\s*$/i, '').trim();
+      promptText = promptText.replace(/[.,;]+$/, '').trim();
+      promptText = promptText.replace(/^(?:generate a 3d model of a|generate a 3d model of|generate a 3d model|generate 3d model of|generate|create a 3d model of)\s+/i, '').trim();
+      
+      if (!isQuiet) {
+        console.log(pc.cyan(`  • Description Prompt: "${pc.bold(promptText)}"`));
+        console.log(pc.cyan(`  • Output File Path:   "${pc.bold(outputPath)}"`));
+        console.log(pc.dim('Executing generate3DModel tool directly...\n'));
+      }
+      
+      try {
+        process.env.PLUMAR_ALLOW_PROJECTS_DIR = 'true';
+        const { mediaTools } = await import('./src/tools/media.js');
+        const result = await mediaTools.generate3DModel.execute({
+          prompt: promptText,
+          outputPath: outputPath,
+          modelName: explicitModel || 'llama-mesh'
+        });
+        delete process.env.PLUMAR_ALLOW_PROJECTS_DIR;
+        
+        if (result.success) {
+          if (isQuiet) {
+            process.stdout.write(result.message + '\n');
+          } else {
+            console.log(`\n${pc.green(pc.bold('✔ Success:'))} ${result.message}\n`);
+          }
+          process.exit(0);
+        } else {
+          console.error(pc.red(`\nGeneration failed: ${result.error || result.message}`));
+          process.exit(1);
+        }
+      } catch (err) {
+        delete process.env.PLUMAR_ALLOW_PROJECTS_DIR;
+        console.error(pc.red(`\nError in direct 3D generation: ${err.message}`));
+        process.exit(1);
+      }
+    }
+
+    // Connect to MCP servers
+    if (!isQuiet) {
+      console.log(pc.cyan('🔌 Connecting to Model Context Protocol (MCP) servers...'));
+    }
+    try {
+      await loadAndStartMcpServers();
+      registerMcpTools(getMcpTools());
+    } catch (err) {
+      if (!isQuiet) {
+        process.stderr.write(`Failed to connect to external MCP servers: ${err.message}\n`);
+      }
+    }
+
+    // Auto-select model and provider
+    let selectedModelName = 'gemma4:latest';
+    let selectedProvider = 'ollama';
+
+    try {
+      // Query Ollama and LM Studio models
+      const ollamaPromise = (async () => {
+        try {
+          setLlmProvider('ollama');
+          return await fetchOllamaModels(true);
+        } catch (e) {
+          return [];
+        }
+      })();
+
+      const lmStudioPromise = (async () => {
+        try {
+          setLlmProvider('lmstudio');
+          return await fetchOllamaModels(true);
+        } catch (e) {
+          return [];
+        }
+      })();
+
+      const [ollamaModels, lmStudioModels] = await Promise.all([ollamaPromise, lmStudioPromise]);
+
+      if (explicitModel) {
+        // Try to match in Ollama first
+        const oMatch = ollamaModels.find(m => m.name.toLowerCase().includes(explicitModel.toLowerCase()));
+        if (oMatch) {
+          selectedModelName = oMatch.name;
+          selectedProvider = 'ollama';
+        } else {
+          const lmMatch = lmStudioModels.find(m => m.name.toLowerCase().includes(explicitModel.toLowerCase()));
+          if (lmMatch) {
+            selectedModelName = lmMatch.name;
+            selectedProvider = 'lmstudio';
+          } else {
+            selectedModelName = explicitModel;
+            selectedProvider = 'ollama';
+          }
+        }
+      } else {
+        // Auto-select preferred models from Ollama or first available
+        if (ollamaModels.length > 0) {
+          const pref = ollamaModels.find(m => m.name.toLowerCase().includes('gemma4') || m.name.toLowerCase().includes('qwen3-coder'));
+          selectedModelName = pref ? pref.name : ollamaModels[0].name;
+          selectedProvider = 'ollama';
+        } else if (lmStudioModels.length > 0) {
+          selectedModelName = lmStudioModels[0].name;
+          selectedProvider = 'lmstudio';
+        }
+      }
+    } catch (err) {
+      if (explicitModel) selectedModelName = explicitModel;
+    }
+
+    setLlmProvider(selectedProvider);
+    const activeModel = selectedModelName;
+    const activeMode = 'balanced';
+    const activeTemperature = explicitTemperature;
+    const activeParameters = {};
+    const sessionId = 'cli-exec-' + Date.now();
+
+    if (!isQuiet) {
+      console.log(pc.dim(`Agent is executing using ${activeModel} (Provider: ${selectedProvider})...\n`));
+    }
+
+    try {
+      const { text, steps } = await runAgentTurn(
+        sessionId,
+        finalCommandLinePrompt,
+        activeModel,
+        activeMode,
+        null,
+        activeTemperature,
+        activeParameters
+      );
+
+      // Print thinking process beautifully if not quiet
+      if (!isQuiet) {
+        printThinkingProcess(steps);
+      }
+
+      // Print final response
+      const formattedText = text.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+      const processedText = formatChatResponse(formattedText);
+      if (isQuiet) {
+        process.stdout.write(processedText);
+      } else {
+        console.log(`${pc.magenta(pc.bold('Plumar › '))} ${processedText}\n`);
+      }
+
+      process.exit(0);
+    } catch (error) {
+      console.error(pc.red(pc.bold('\nError executing command:')));
+      console.error(pc.red(`   ${error.message}`));
+      process.exit(1);
+    }
+  }
+
   if (process.argv.includes('--mcp') || process.env.MCP_MODE === 'true') {
     const { runMcpServer } = await import('./src/mcp.js');
     runMcpServer();
@@ -1805,6 +2064,9 @@ export const tool = new FunctionTool({
         process.stdin.removeListener('keypress', keypressHandler);
         if (process.stdin.setRawMode) {
           process.stdin.setRawMode(oldRawMode || false);
+        }
+        if (!rl) {
+          process.stdin.pause();
         }
       }
     }

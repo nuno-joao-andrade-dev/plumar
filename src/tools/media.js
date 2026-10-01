@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { resolveSafePath, parseHexColor, getGenAIClient } from './core-helper.js';
 import { FONT_5X7, blockFont, slantFont, renderText } from './ascii-fonts.js';
-import { getOllamaBaseUrl, getOllamaHeaders } from '../agent-config.js';
+import { getOllamaBaseUrl, getOllamaHeaders, getLlmProvider } from '../agent-config.js';
 
 export const mediaTools = {
   createAsciiArt: new FunctionTool({
@@ -1110,6 +1110,319 @@ export const mediaTools = {
           message: 'Image analyzed successfully.',
           response: contentResponse
         };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+  }),
+
+  generate3DModel: new FunctionTool({
+    name: 'generate3DModel',
+    description: 'Generates a 3D model (Wavefront .obj mesh) using the local llama-mesh model, falling back to other local LLMs or procedural generation if unavailable, and saves it using the writeBinaryFile tool.',
+    parameters: z.object({
+      prompt: z.string().describe('Natural language description of the 3D object to generate (e.g., "a simple wooden chair", "a low-poly axe").'),
+      outputPath: z.string().optional().default('model.obj').describe('The relative workspace path where the generated 3D .obj file will be saved.'),
+      modelName: z.string().optional().default('llama-mesh').describe('The model name to use for mesh generation (default: llama-mesh).')
+    }),
+    execute: async ({ prompt, outputPath = 'model.obj', modelName = 'llama-mesh' }) => {
+      try {
+        const baseUrl = getOllamaBaseUrl();
+        const headers = getOllamaHeaders();
+        const provider = getLlmProvider();
+        let finalModel = modelName;
+        let useOllama = false;
+        let objContent = '';
+
+        // 1. Fetch tags/models to see what models are available
+        try {
+          let availableModels = [];
+          if (provider === 'lmstudio') {
+            let url = baseUrl;
+            if (!url.endsWith('/v1') && !url.includes('/v1/')) {
+              url = url + '/v1';
+            }
+            const response = await fetch(`${url}/models`, {
+              headers,
+              signal: AbortSignal.timeout(5000)
+            });
+            if (response.ok) {
+              const data = await response.json();
+              availableModels = (data.data || []).map(m => m.id);
+            }
+          } else {
+            const response = await fetch(`${baseUrl}/api/tags`, {
+              headers,
+              signal: AbortSignal.timeout(5000)
+            });
+            if (response.ok) {
+              const data = await response.json();
+              availableModels = (data.models || []).map(m => m.name);
+            }
+          }
+
+          // Check if user's requested modelName (e.g. 'llama-mesh') is available
+          const hasRequestedModel = availableModels.some(name => 
+            name.toLowerCase().includes(modelName.toLowerCase())
+          );
+
+          if (hasRequestedModel) {
+            finalModel = availableModels.find(name => 
+              name.toLowerCase().includes(modelName.toLowerCase())
+            );
+            useOllama = true;
+          } else {
+            // Fallback to any of the user's highly capable installed models
+            const fallbacks = ['gemma4', 'qwen3-coder', 'gemma2:2b', 'llama3'];
+            const foundFallback = fallbacks.find(fb => 
+              availableModels.some(name => name.toLowerCase().includes(fb.toLowerCase()))
+            );
+            if (foundFallback) {
+              finalModel = availableModels.find(name => 
+                name.toLowerCase().includes(foundFallback.toLowerCase())
+              );
+              useOllama = true;
+              console.log(`[generate3DModel] Requested model "${modelName}" not found. Falling back to local model: ${finalModel}`);
+            }
+          }
+        } catch (err) {
+          console.log(`[generate3DModel] Active provider tag check failed: ${err.message}. Falling back to procedural or default model generation.`);
+        }
+
+        // 2. Query provider if available
+        if (useOllama) {
+          try {
+            const systemPrompt = `You are LLaMA-Mesh, an expert AI specialized in 3D Wavefront OBJ generation.
+Generate ONLY valid Wavefront OBJ file content for the requested object.
+Ensure you output vertex coordinates (v x y z) and face indices (f v1 v2 v3).
+IMPORTANT: Do NOT wrap the code in markdown blocks like \`\`\`obj, do NOT include any introductory or explanatory text. Start directly with the vertex lines and end with the face definitions.`;
+
+            let chatUrl;
+            let chatBody;
+
+            if (provider === 'lmstudio') {
+              let url = baseUrl;
+              if (!url.endsWith('/v1') && !url.includes('/v1/')) {
+                url = url + '/v1';
+              }
+              chatUrl = `${url}/chat/completions`;
+              chatBody = JSON.stringify({
+                model: finalModel,
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: `Generate a 3D model of: ${prompt}` }
+                ],
+                stream: true,
+                temperature: 0.2
+              });
+            } else {
+              chatUrl = `${baseUrl}/api/chat`;
+              chatBody = JSON.stringify({
+                model: finalModel,
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: `Generate a 3D model of: ${prompt}` }
+                ],
+                stream: true,
+                options: {
+                  temperature: 0.2
+                }
+              });
+            }
+
+            const chatResponse = await fetch(chatUrl, {
+              method: 'POST',
+              headers,
+              body: chatBody
+            });
+
+            if (chatResponse.ok) {
+              const reader = chatResponse.body.getReader();
+              const decoder = new TextDecoder();
+              let buffer = '';
+              let fullText = '';
+              let totalBytes = 0;
+              let lastActivityTime = Date.now();
+              const idleTimeoutMs = 60000; // 60s inactivity timeout (auto-extends if data keeps coming!)
+
+              // Monitor inactivity in background
+              const activityInterval = setInterval(() => {
+                if (Date.now() - lastActivityTime > idleTimeoutMs) {
+                  console.log(`\n[generate3DModel] Inactivity timeout: No data received for ${idleTimeoutMs / 1000}s. Aborting.`);
+                  reader.cancel('Inactivity timeout');
+                  clearInterval(activityInterval);
+                }
+              }, 5000);
+
+              try {
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+
+                  lastActivityTime = Date.now(); // Reset inactivity timer dynamically on active data flow!
+                  totalBytes += value.length;
+                  const chunkStr = decoder.decode(value, { stream: true });
+                  buffer += chunkStr;
+
+                  // Real-time data received size display!
+                  const kb = (totalBytes / 1024).toFixed(2);
+                  process.stderr.write(`\r[generate3DModel] Streaming 3D mesh: ${kb} KB received...`);
+
+                  // Split the buffer by newlines to process complete JSON/SSE objects
+                  const lines = buffer.split('\n');
+                  buffer = lines.pop(); // keep the last partial line in the buffer
+
+                  for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+
+                    if (provider === 'lmstudio') {
+                      if (trimmed === 'data: [DONE]') continue;
+                      if (trimmed.startsWith('data: ')) {
+                        try {
+                          const json = JSON.parse(trimmed.slice(6));
+                          const delta = json.choices?.[0]?.delta?.content || '';
+                          fullText += delta;
+                        } catch (e) {
+                          // Ignore partial lines
+                        }
+                      }
+                    } else {
+                      // Ollama JSON stream format
+                      try {
+                        const json = JSON.parse(trimmed);
+                        const delta = json.message?.content || '';
+                        fullText += delta;
+                      } catch (e) {
+                        // Ignore partial lines
+                      }
+                    }
+                  }
+                }
+
+                // Process remaining buffer contents
+                if (buffer.trim()) {
+                  const trimmed = buffer.trim();
+                  if (provider === 'lmstudio') {
+                    if (trimmed.startsWith('data: ') && trimmed !== 'data: [DONE]') {
+                      try {
+                        const json = JSON.parse(trimmed.slice(6));
+                        fullText += json.choices?.[0]?.delta?.content || '';
+                      } catch (e) {}
+                    }
+                  } else {
+                    try {
+                      const json = JSON.parse(trimmed);
+                      fullText += json.message?.content || '';
+                    } catch (e) {}
+                  }
+                }
+                process.stderr.write('\n');
+              } finally {
+                clearInterval(activityInterval);
+              }
+
+              // Extract only valid Wavefront OBJ lines
+              const lines = fullText.split('\n');
+              const objLines = lines.filter(line => {
+                const trimmed = line.trim();
+                return trimmed.startsWith('v ') || 
+                       trimmed.startsWith('vt ') || 
+                       trimmed.startsWith('vn ') || 
+                       trimmed.startsWith('f ') || 
+                       trimmed.startsWith('g ') || 
+                       trimmed.startsWith('#') || 
+                       trimmed.startsWith('usemtl ') || 
+                       trimmed.startsWith('mtllib ');
+              });
+
+              if (objLines.length > 0 && objLines.some(l => l.trim().startsWith('v ')) && objLines.some(l => l.trim().startsWith('f '))) {
+                objContent = objLines.join('\n');
+              }
+            }
+          } catch (err) {
+            console.log(`[generate3DModel] Streaming generation failed: ${err.message}. Falling back to procedural generator.`);
+          }
+        }
+
+        // 3. Absolute Procedural Fallback if no OBJ was generated
+        if (!objContent) {
+          console.log(`[generate3DModel] Procedural generator fallback activated for: "${prompt}"`);
+          const p = prompt.toLowerCase();
+          if (p.includes('pyramid') || p.includes('cone')) {
+            objContent = `# Procedural Pyramid representing: ${prompt}
+v 0.0 1.0 0.0
+v -1.0 -1.0 1.0
+v 1.0 -1.0 1.0
+v 1.0 -1.0 -1.0
+v -1.0 -1.0 -1.0
+f 1 2 3
+f 1 3 4
+f 1 4 5
+f 1 5 2
+f 5 4 3 2
+`;
+          } else if (p.includes('cylinder') || p.includes('pillar') || p.includes('cup') || p.includes('glass')) {
+            objContent = `# Procedural Cylinder representing: ${prompt}
+v -0.5 1.0 -0.5
+v 0.5 1.0 -0.5
+v 0.5 1.0 0.5
+v -0.5 1.0 0.5
+v -0.5 -1.0 -0.5
+v 0.5 -1.0 -0.5
+v 0.5 -1.0 0.5
+v -0.5 -1.0 0.5
+f 1 2 3 4
+f 5 8 7 6
+f 1 5 6 2
+f 2 6 7 3
+f 3 7 8 4
+f 4 8 5 1
+`;
+          } else {
+            // Default Cube / Box / Table
+            objContent = `# Procedural Cube representing: ${prompt}
+v -1.0 -1.0 1.0
+v 1.0 -1.0 1.0
+v 1.0 1.0 1.0
+v -1.0 1.0 1.0
+v -1.0 -1.0 -1.0
+v 1.0 -1.0 -1.0
+v 1.0 1.0 -1.0
+v -1.0 1.0 -1.0
+f 1 2 3 4
+f 5 8 7 6
+f 1 5 6 2
+f 2 6 7 3
+f 3 7 8 4
+f 4 8 5 1
+`;
+          }
+        }
+
+        // 4. Save using the new writeBinaryFile tool
+        const { filesystemTools } = await import('./filesystem.js');
+        const base64Content = Buffer.from(objContent, 'utf-8').toString('base64');
+        
+        const saveResult = await filesystemTools.writeBinaryFile.execute({
+          filePath: outputPath,
+          content: base64Content,
+          encoding: 'base64'
+        });
+
+        if (saveResult.success) {
+          return {
+            success: true,
+            outputPath,
+            modelUsed: useOllama ? finalModel : 'procedural-fallback',
+            sizeBytes: saveResult.sizeBytes,
+            message: `Successfully generated 3D model for "${prompt}" and saved it to ${outputPath} using the writeBinaryFile tool.`
+          };
+        } else {
+          return {
+            success: false,
+            error: `Failed to save the 3D model: ${saveResult.error}`
+          };
+        }
       } catch (error) {
         return { success: false, error: error.message };
       }

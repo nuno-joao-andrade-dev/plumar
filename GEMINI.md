@@ -14,7 +14,7 @@ This file outlines the complete set of instructions provided during our session,
 
 ## 🛠️ Complete Workspace Tools Reference
 
-The plumar-cli environment now features a robust suite of **19 core tools** to assist with math, diagnostics, workspace organization, advanced editing, terminal workflows, and interactive testing.
+The plumar-cli environment now features a robust suite of **21 core tools** to assist with math, diagnostics, workspace organization, advanced editing, terminal workflows, and interactive testing.
 
 ### 🔌 1. Coding & Terminal Utilities (Core Workflow)
 | Tool Name | Description | Key Parameters |
@@ -30,6 +30,7 @@ The plumar-cli environment now features a robust suite of **19 core tools** to a
 | **`listFiles`** | Recursively lists all workspace directory contents, automatically filtering out dependency folders and lock files. | `directory` |
 | **`readFile`** | Reads the content of a text file inside the workspace, safely truncating outputs to 10,000 characters to protect context. | `filePath` |
 | **`writeFile`** | Creates a new text file or fully overwrites an existing file with the provided text. | `filePath`, `content` |
+| **`writeBinaryFile`** 🆕 | Creates a new binary file or overwrites an existing one with base64/hex content. | `filePath`, `content`, `encoding` |
 | **`appendFile`** | Appends text content to the end of an existing file (implicitly creates the file if missing). | `filePath`, `content` |
 | **`deleteFile`** | Safely removes a file from the workspace filesystem. | `filePath` |
 | **`makeDirectory`** | Explicitly creates a new directory, supporting deeply nested folder creation. | `directoryPath` |
@@ -50,6 +51,7 @@ The plumar-cli environment now features a robust suite of **19 core tools** to a
 | :--- | :--- | :--- |
 | **`dinoGame`** 🆕 | Spins up a local Node.js HTTP server and automatically opens the **plumar-cli Dino** web game in your default browser. | `action` (`"start"` \| `"stop"` \| `"status"`) |
 | **`createAsciiArt`** 🆕 | Generates beautiful, retro-styled ASCII art using high-fidelity block/slant fonts, customized shapes (heart, star, dino, rocket, coffee), or a loaded image file (PNG, JPEG, etc.) with optional 24-bit TrueColor ANSI output. | `text`, `font` (`"block"` \| `"slant"`), `presetShape` (`"heart"` \| `"star"` \| `"dino"` \| `"rocket"` \| `"coffee"`), `imagePath` (string), `imageWidth` (number), `colored` (boolean) |
+| **`generate3DModel`** 🆕 | Generates a 3D Wavefront OBJ model using LLaMA-Mesh or local fallback models, and saves it using `writeBinaryFile`. | `prompt`, `outputPath`, `modelName` |
 
 ### 🔌 5. Advanced Developer Utilities (Database, Process, Git & Linter Tools) 🆕
 | Tool Name | Description | Key Parameters |

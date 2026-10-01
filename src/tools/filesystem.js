@@ -129,6 +129,44 @@ export const filesystemTools = {
     },
   }),
 
+  writeBinaryFile: new FunctionTool({
+    name: 'writeBinaryFile',
+    description: 'Create a new binary file or overwrite an existing one with base64/hex-encoded content in the workspace.',
+    parameters: z.object({
+      filePath: z.string().optional().describe('The relative path of the file to write'),
+      path: z.string().optional().describe('Alternative parameter name for filePath'),
+      content: z.string().describe('The base64 or hex encoded content to write to the file'),
+      encoding: z.enum(['base64', 'hex']).optional().default('base64').describe('The encoding of the content parameter (default: base64)'),
+    }),
+    execute: async (args = {}) => {
+      try {
+        const filePath = args.filePath || args.path;
+        if (!filePath) {
+          return { success: false, error: 'Missing required parameter: filePath or path' };
+        }
+        const content = args.content !== undefined ? args.content : '';
+        const encoding = args.encoding || 'base64';
+        const targetPath = resolveSafePath(filePath);
+        
+        // Ensure directory structure exists
+        await fs.mkdir(path.dirname(targetPath), { recursive: true });
+        
+        const buffer = Buffer.from(content, encoding);
+        await fs.writeFile(targetPath, buffer);
+        const stats = await fs.stat(targetPath);
+        
+        return {
+          success: true,
+          filePath,
+          sizeBytes: stats.size,
+          message: `Successfully wrote ${stats.size} bytes of binary data using ${encoding} encoding to ${filePath}`,
+        };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    },
+  }),
+
   appendFile: new FunctionTool({
     name: 'appendFile',
     description: 'Append text content to an existing file in the workspace.',

@@ -351,8 +351,8 @@ export function detectAndParseTextToolCalls(text) {
     }
     foundCalls.push({ name, args, rawMatch: match[0] });
   }
-  // 2.7 Match history-style [Agent Tool Call: Executed "tool_name" with args: {arguments}]
-  const agentToolCallRegex = /\[Agent Tool Call:\s*(?:Executed\s*)?["']?([a-zA-Z0-9_-]+)["']?\s*(?:with\s+args:|args:)?\s*(\{[\s\S]*?\})\]/gi;
+  // 2.7 Match tool call tag style [Agent Tool Call: "tool_name" with args: {arguments}] (Ignore "Executed" which indicates past logs)
+  const agentToolCallRegex = /\[Agent Tool Call:\s*(?!Executed\b)["']?([a-zA-Z0-9_-]+)["']?\s*(?:with\s+args:|args:)?\s*(\{[\s\S]*?\})\]/gi;
   while ((match = agentToolCallRegex.exec(text)) !== null) {
     const name = match[1].trim();
     const rawArgs = match[2].trim();
@@ -457,7 +457,7 @@ export function getImageMimeType(buffer) {
 }
 
 export function startSpinner(message) {
-  if (!process.stdout.isTTY) {
+  if (!process.stdout.isTTY || process.env.PLUMAR_QUIET === 'true') {
     return { stop: () => {} };
   }
 
@@ -738,7 +738,7 @@ export class Ollama extends BaseLlm {
         
         requestPayload.messages = mergedMessages;
         
-        const textOnlyGuidance = `\n\nCRITICAL SYSTEM NOTICE: Native tool-calling is disabled for this model. You MUST invoke any tool calls by writing a standard JSON code block in your response. Example to write a hello.cpp file:\n\`\`\`json\n{\n  "name": "writeFile",\n  "arguments": {\n    "path": "hello.cpp",\n    "content": "#include <iostream>\\n\\nint main() {\\n    std::cout << \\"Hello, World!\\" << std::endl;\\n    return 0;\\n}"\n  }\n}\n\`\`\`\nDo NOT just explain your plan conversational style. You MUST output the JSON tool call block inside your markdown content.`;
+        const textOnlyGuidance = `\n\nCRITICAL SYSTEM NOTICE: Native tool-calling is disabled for this model. When you need to invoke an action, you MUST write a standard JSON code block in your response. Example:\n\`\`\`json\n{\n  "name": "writeFile",\n  "arguments": {\n    "path": "hello.cpp",\n    "content": "#include <iostream>\\n\\nint main() {\\n    std::cout << \\"Hello, World!\\" << std::endl;\\n    return 0;\\n}"\n  }\n}\n\`\`\`\nIMPORTANT: Once a tool execution result has been returned to you in conversation history, do NOT output the JSON tool call block again! Simply reply to the user with your final answer and explanation in plain text.`;
 
         // Check if there is a system message to append to
         const systemMsg = requestPayload.messages.find(msg => msg.role === 'system');
@@ -746,11 +746,18 @@ export class Ollama extends BaseLlm {
           systemMsg.content = (systemMsg.content || '') + textOnlyGuidance;
         }
 
-        // Also append a strong, immediate reminder to the end of the last real user message (never to a tool response!)
+        // Check if the conversation ends with a tool execution result
+        const hasToolResultAtEnd = requestPayload.messages.length > 0 && requestPayload.messages[requestPayload.messages.length - 1].isToolResponse;
+
+        // Also append an appropriate reminder to the end of the last real user message
         const realUserMessages = requestPayload.messages.filter(msg => msg.role === 'user' && !msg.isToolResponse);
         if (realUserMessages.length > 0) {
           const lastUserMsg = realUserMessages[realUserMessages.length - 1];
-          lastUserMsg.content = (lastUserMsg.content || '') + `\n\n(Reminder: Please write the exact JSON code block to call your tools. Example: \`\`\`json\n{\n  "name": "writeFile",\n  "arguments": { "path": "hello.cpp", "content": "..." }\n}\n\`\`\`)`;
+          if (hasToolResultAtEnd) {
+            lastUserMsg.content = (lastUserMsg.content || '') + `\n\n(Notice: Tool execution has completed successfully. Please respond to the user with the result or summary. Do NOT repeat the previous tool call JSON block.)`;
+          } else {
+            lastUserMsg.content = (lastUserMsg.content || '') + `\n\n(Reminder: Please write the exact JSON code block to call your tools. Example: \`\`\`json\n{\n  "name": "writeFile",\n  "arguments": { "path": "hello.cpp", "content": "..." }\n}\n\`\`\`)`;
+          }
         }
 
         // Clean up temporary isToolResponse flags
@@ -956,6 +963,37 @@ export class Ollama extends BaseLlm {
       const parsed = detectAndParseTextToolCalls(text);
       text = parsed.text;
       textToolCalls.push(...parsed.calls);
+
+      // Filter out text tool calls that are merely echoing completed tool calls from conversation history
+      if (textToolCalls.length > 0 && Array.isArray(llmRequest.contents) && llmRequest.contents.length > 0) {
+        const lastContent = llmRequest.contents[llmRequest.contents.length - 1];
+        const hasPrecedingToolResponse = (lastContent.parts || []).some(p => p.functionResponse);
+        if (hasPrecedingToolResponse) {
+          // Collect all previous function calls from the conversation history
+          const previousFunctionCalls = [];
+          for (const c of llmRequest.contents) {
+            for (const p of (c.parts || [])) {
+              if (p.functionCall) {
+                previousFunctionCalls.push(p.functionCall);
+              }
+            }
+          }
+          
+          // Filter out text tool calls that match already executed function calls
+          const filteredCalls = [];
+          for (const call of textToolCalls) {
+            const callArgsStr = JSON.stringify(call.args || {});
+            const alreadyExecuted = previousFunctionCalls.some(prev => 
+              prev.name === call.name && JSON.stringify(prev.args || {}) === callArgsStr
+            );
+            if (!alreadyExecuted) {
+              filteredCalls.push(call);
+            }
+          }
+          textToolCalls.length = 0;
+          textToolCalls.push(...filteredCalls);
+        }
+      }
     }
     
     if (text) {

@@ -206,13 +206,56 @@ export async function checkToolPermission(toolName, args) {
   return approved;
 }
 
+// Active turn tool execution history tracker to prevent infinite loops and redundant re-executions
+const activeTurnToolHistory = [];
+
+/**
+ * Resets the active turn tool execution history at the start of a new agent turn.
+ */
+export function resetTurnToolHistory() {
+  activeTurnToolHistory.length = 0;
+}
+
 // Wrapper function to add CLI printing, logging and error capturing around any FunctionTool
 export function wrapFunctionTool(toolObj) {
   return new FunctionTool({
     name: toolObj.name,
     description: toolObj.description,
     parameters: toolObj.parameters,
-    execute: async (args, context) => {
+    execute: async (args = {}, context) => {
+      // Loop and duplicate call detection
+      const serializedArgs = JSON.stringify(args || {});
+      const toolSignature = `${toolObj.name}:${serializedArgs}`;
+      const duplicateCount = activeTurnToolHistory.filter(sig => sig === toolSignature).length;
+
+      // If the exact same tool with identical arguments was called 2 or more times already in this turn
+      if (duplicateCount >= 2) {
+        const loopError = {
+          success: false,
+          loopDetected: true,
+          error: `Loop prevention triggered: Tool "${toolObj.name}" was already invoked ${duplicateCount} times with identical arguments in this turn. Execution blocked to prevent an infinite loop. You MUST now stop calling tools and provide your final response to the user.`
+        };
+        console.log(pc.yellow(`\n⚠️ [Loop Detected] Tool "${pc.bold(toolObj.name)}" was called repeatedly with identical arguments. Blocking execution to prevent an infinite loop.`));
+        printToolResult(toolObj.name, loopError);
+        return loopError;
+      }
+
+      // If a file-writing / idempotent mutation tool is called a second time with identical arguments
+      const isWriteTool = ['writeFile', 'writeBinaryFile', 'writeMarkdown', 'appendFile', 'searchReplace'].includes(toolObj.name);
+      if (duplicateCount === 1 && isWriteTool) {
+        activeTurnToolHistory.push(toolSignature);
+        const cachedSuccess = {
+          success: true,
+          cached: true,
+          message: `Operation for "${toolObj.name}" was already completed successfully with identical arguments in this turn. File is up-to-date. Do NOT call "${toolObj.name}" again with the same arguments. Please summarize your actions and respond to the user.`
+        };
+        console.log(pc.yellow(`\n⚠️ [Duplicate Prevented] Tool "${pc.bold(toolObj.name)}" was already executed successfully with these arguments in this turn. Skipping redundant disk write.`));
+        printToolResult(toolObj.name, cachedSuccess);
+        return cachedSuccess;
+      }
+
+      activeTurnToolHistory.push(toolSignature);
+
       const allowed = await checkToolPermission(toolObj.name, args);
       if (!allowed) {
         const errorResult = { success: false, error: `Tool execution denied: User policy blocks "${toolObj.name}"` };
