@@ -221,13 +221,38 @@ Format of the tool call inside your response:
 `;
   }
 
-  // Append standard guidance on background execution
+  // Append standard guidance on background execution and process management
   systemPrompt += `
 
-### Background Process and Execution Guidance
-When the user asks you to "execute in background", "run in background", "start the background service", "start the server", or perform a task in the background:
-1. **YOU CAN RUN BACKGROUND COMMANDS**: You have the full ability to run shell commands, applications, and services in the background using the \`executeCommand\` tool. To do so, invoke \`executeCommand\` with standard shell background operators (for example, appending \` &\` to the shell command, or using \`nohup <command> > background.log 2>&1 &\`).
-2. **DO NOT REFUSE**: Never refuse background execution requests by claiming you do not have graphical/process management access or a background execution environment. You run inside a Linux terminal workspace environment with standard process management capability via \`executeCommand\`.
+### Background Process & Server Execution Guidance
+You have a persistent process management system and background execution environment. You can directly run and monitor long-running background servers (Node.js servers, Angular \`ng serve\`, React/Vite development servers, APIs, Python servers, daemons, watchers) in the background without blocking execution.
+
+CRITICAL INSTRUCTIONS:
+1. **NEVER REFUSE**: Do NOT claim you cannot run persistent processes, lack a terminal, or lack background process management.
+2. **DO NOT TELL USER TO RUN MANUALLY**: Do not tell the user to open a separate terminal to run "node index.js" or "ng serve --open" themselves.
+3. **INVOKE THE TOOLS**: When asked to run setup commands, start servers, or execute tasks in the background, you MUST invoke \`executeCommand\` with \`background: true\` or \`processManager\` with \`action: "start"\`:
+   - Example 1 (Backend Node.js Server):
+     \`\`\`json
+     {
+       "name": "executeCommand",
+       "arguments": {
+         "command": "cd backend && node index.js",
+         "background": true,
+         "name": "backend"
+       }
+     }
+     \`\`\`
+   - Example 2 (Frontend Angular / React Dev Server):
+     \`\`\`json
+     {
+       "name": "executeCommand",
+       "arguments": {
+         "command": "cd frontend && ng serve --open",
+         "background": true,
+         "name": "frontend"
+       }
+     }
+     \`\`\`
 `;
 
   // Append standard guidance on multimodal & image analysis (OCR/description)

@@ -1352,7 +1352,46 @@ test('21. Process Manager and Background Process Execution', async (t) => {
     // Clean up
     await tools.processManager.execute({ action: 'stop', processId: res.processId });
   });
+
+  await t.test('detectAndParseTextToolCalls: should intercept canned background refusal and auto-extract commands', async () => {
+    const sampleRefusal = `I understand you are asking me to execute the commands in the background again.
+
+As a large language model operating in this environment, I do not have the
+ability to run persistent, long-running server processes (like Node.js or
+Angular
+servers) in the background on your local machine. This functionality requires
+direct interaction with your operating system's terminal, which I cannot access
+for persistent operation.
+
+To get your application running, you must execute these commands yourself in
+your local terminal:
+
+1. For the Backend (Node.js Server):
+  • Open a terminal and navigate to the backend directory:
+    cd /home/nandrade/projects/nja.dev/tst/reservation-app/backend
+    node index.js
+
+2. For the Frontend (Angular App):
+  • Open a second terminal and navigate to the frontend directory:
+    cd /home/nandrade/projects/nja.dev/tst/reservation-app/frontend
+    ng serve --open
+
+This is the standard procedure for running full-stack applications.`;
+
+    const parsed = detectAndParseTextToolCalls(sampleRefusal);
+    assert.strictEqual(parsed.calls.length, 2);
+    assert.strictEqual(parsed.calls[0].name, 'executeCommand');
+    assert.strictEqual(parsed.calls[0].args.background, true);
+    assert.strictEqual(parsed.calls[0].args.name, 'backend');
+    assert.match(parsed.calls[0].args.command, /cd .*backend && node index\.js/);
+
+    assert.strictEqual(parsed.calls[1].name, 'executeCommand');
+    assert.strictEqual(parsed.calls[1].args.background, true);
+    assert.strictEqual(parsed.calls[1].args.name, 'frontend');
+    assert.match(parsed.calls[1].args.command, /cd .*frontend && ng serve --open/);
+  });
 });
+
 
 
 

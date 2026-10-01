@@ -417,6 +417,16 @@ export function detectAndParseTextToolCalls(text) {
     }
   }
 
+  // 5. Intelligent recovery: If model outputs a canned refusal claiming it cannot run background processes,
+  // but provided the exact commands and directories for the user to run manually, intercept and execute them!
+  if (foundCalls.length === 0) {
+    const recoveredCalls = extractRefusedBackgroundCommands(text);
+    if (recoveredCalls.length > 0) {
+      foundCalls.push(...recoveredCalls);
+      tempText = 'Starting the requested services in the background...';
+    }
+  }
+
   // Strip found calls from text
   for (const call of foundCalls) {
     tempText = tempText.replace(call.rawMatch, '');
@@ -426,6 +436,111 @@ export function detectAndParseTextToolCalls(text) {
     text: tempText.trim(),
     calls: foundCalls
   };
+}
+
+/**
+ * Intelligent recovery helper: Detects when a model outputs a canned refusal claiming
+ * it cannot run persistent servers in the background, but gave the user the exact
+ * commands to run manually (e.g. backend / frontend commands).
+ * Parses those commands out and automatically transforms them into executeCommand calls.
+ */
+export function extractRefusedBackgroundCommands(text) {
+  if (!text || typeof text !== 'string') return [];
+
+  const isBackgroundRefusal = /(?:do not have|cannot|unable to|no access to).*(?:persistent|background).*(?:server|process|operation|terminal|environment)|as a (?:large )?language model.*(?:persistent|server|terminal|background)/is.test(text);
+  if (!isBackgroundRefusal) return [];
+
+  const foundCommands = [];
+
+  // Pattern A: Numbered/bulleted sections like "1. For the Backend... cd ... node ..."
+  const sections = text.split(/(?=\d+\.\s*(?:For the|Backend|Frontend|Server|API))/i);
+  for (const sec of sections) {
+    const lines = sec.split('\n').map(l => l.trim().replace(/^[•\-\*`\s]+/, '').replace(/`+$/, ''));
+    const header = (lines[0] || '').toLowerCase();
+
+    let name = 'service';
+    if (header.includes('backend') || (/backend/i.test(sec) && !header.includes('frontend'))) {
+      name = 'backend';
+    }
+    if (header.includes('frontend') || (/frontend/i.test(sec) && !header.includes('backend'))) {
+      name = 'frontend';
+    }
+
+    let cdPath = null;
+    let runCmd = null;
+
+    for (const line of lines) {
+      if (/^cd\s+[^\s&;]+/i.test(line)) {
+        cdPath = line;
+      } else if (/^(?:node|npm|npx|ng|yarn|pnpm|bun|python|python3|flask|uvicorn|cargo|go)\s+/i.test(line)) {
+        runCmd = line;
+      }
+    }
+
+    if (cdPath && runCmd) {
+      foundCommands.push({
+        name: 'executeCommand',
+        args: {
+          command: `${cdPath} && ${runCmd}`,
+          background: true,
+          name
+        },
+        rawMatch: sec
+      });
+    } else if (runCmd) {
+      foundCommands.push({
+        name: 'executeCommand',
+        args: {
+          command: runCmd,
+          background: true,
+          name
+        },
+        rawMatch: sec
+      });
+    }
+  }
+
+  // Pattern B: Fallback if no sections matched, check for code blocks with server commands
+  if (foundCommands.length === 0) {
+    const codeBlockRegex = /```(?:bash|sh|zsh)?\s*([\s\S]*?)```/gi;
+    let cbMatch;
+    while ((cbMatch = codeBlockRegex.exec(text)) !== null) {
+      const blockContent = cbMatch[1].trim();
+      const lines = blockContent.split('\n').map(l => l.trim()).filter(Boolean);
+      let cdPath = null;
+      let runCmd = null;
+      for (const line of lines) {
+        if (/^cd\s+/i.test(line)) {
+          cdPath = line;
+        } else if (/^(?:node|npm|npx|ng|yarn|pnpm|bun|python|python3|flask|uvicorn|cargo|go)\s+/i.test(line)) {
+          runCmd = line;
+        }
+      }
+      if (cdPath && runCmd) {
+        foundCommands.push({
+          name: 'executeCommand',
+          args: {
+            command: `${cdPath} && ${runCmd}`,
+            background: true,
+            name: runCmd.includes('ng') ? 'frontend' : 'backend'
+          },
+          rawMatch: cbMatch[0]
+        });
+      } else if (runCmd) {
+        foundCommands.push({
+          name: 'executeCommand',
+          args: {
+            command: runCmd,
+            background: true,
+            name: runCmd.includes('ng') ? 'frontend' : 'service'
+          },
+          rawMatch: cbMatch[0]
+        });
+      }
+    }
+  }
+
+  return foundCommands;
 }
 
 export function isValidImageBuffer(buffer) {
