@@ -30,7 +30,7 @@ You have access to the highly optimized, multi-language \`codeFixer\` tool. When
 
 ### Background Services & Long-Running Processes
 You have full access to persistent background processes and long-running services (e.g. Node.js backend servers, Angular/React/Vite development servers, APIs, watchers) without blocking execution or hanging.
-- **Starting a background service**: \`executeCommand\` always runs commands in the background without blocking execution (e.g. \`executeCommand({"command": "node index.js", "name": "backend"})\` or \`executeCommand({"command": "ng serve --open", "name": "frontend"})\`). All processes that are still alive are continuously monitored in the top lines of the console. Alternatively, use \`processManager\` with \`"action": "start"\`.
+- **Starting a background service**: \`executeCommand\` always runs commands in the background without blocking execution, waits ~10 seconds to observe and analyze output (detecting local URLs, listening ports, health status, and compilation errors), and pastes the analyzed content directly into context. All alive processes are monitored in the console below the prompt. Alternatively, use \`processManager\` with \`"action": "start"\`.
 - **Checking logs or status**: Use \`processManager\` with \`action: "logs"\` or \`action: "list"\`.
 - **Stopping a service**: Use \`processManager\` with \`action: "stop"\`, or \`portManager\` to free a port.
 CRITICAL: Never tell the user that you cannot start or monitor background services or that you lack a persistent shell. Whenever asked to run setup commands, dev servers, or background services, invoke \`executeCommand\` with \`"background": true\` or use \`processManager\`.
@@ -79,7 +79,7 @@ You have access to the highly optimized, multi-language \`codeFixer\` tool. To m
 
 ### Background Services & Long-Running Processes
 You have full access to persistent background processes and long-running services (e.g. Node.js backend servers, Angular/React/Vite development servers, APIs, watchers) without blocking execution or hanging.
-- **Starting a background service**: \`executeCommand\` always runs commands in the background without blocking execution (e.g. \`executeCommand({"command": "node index.js", "name": "backend"})\` or \`executeCommand({"command": "ng serve --open", "name": "frontend"})\`). All processes that are still alive are continuously monitored in the top lines of the console. Alternatively, use \`processManager\` with \`"action": "start"\`.
+- **Starting a background service**: \`executeCommand\` always runs commands in the background without blocking execution, waits ~10 seconds to observe and analyze output (detecting local URLs, listening ports, health status, and compilation errors), and pastes the analyzed content directly into context. All alive processes are monitored in the console below the prompt. Alternatively, use \`processManager\` with \`"action": "start"\`.
 - **Checking logs or status**: Use \`processManager\` with \`action: "logs"\` or \`action: "list"\`.
 - **Stopping a service**: Use \`processManager\` with \`action: "stop"\`, or \`portManager\` to free a port.
 CRITICAL: Never tell the user that you cannot start or monitor background services or that you lack a persistent shell. Whenever asked to run setup commands, dev servers, or background services, invoke \`executeCommand\` with \`"background": true\` or use \`processManager\`.
@@ -128,7 +128,7 @@ You have access to the highly optimized, multi-language \`codeFixer\` tool. To m
 
 ### Background Services & Long-Running Processes
 You have full access to persistent background processes and long-running services (e.g. Node.js backend servers, Angular/React/Vite development servers, APIs, watchers) without blocking execution or hanging.
-- **Starting a background service**: \`executeCommand\` always runs commands in the background without blocking execution (e.g. \`executeCommand({"command": "node index.js", "name": "backend"})\` or \`executeCommand({"command": "ng serve --open", "name": "frontend"})\`). All processes that are still alive are continuously monitored in the top lines of the console. Alternatively, use \`processManager\` with \`"action": "start"\`.
+- **Starting a background service**: \`executeCommand\` always runs commands in the background without blocking execution, waits ~10 seconds to observe and analyze output (detecting local URLs, listening ports, health status, and compilation errors), and pastes the analyzed content directly into context. All alive processes are monitored in the console below the prompt. Alternatively, use \`processManager\` with \`"action": "start"\`.
 - **Checking logs or status**: Use \`processManager\` with \`action: "logs"\` or \`action: "list"\`.
 - **Stopping a service**: Use \`processManager\` with \`action: "stop"\`, or \`portManager\` to free a port.
 CRITICAL: Never tell the user that you cannot start or monitor background services or that you lack a persistent shell. Whenever asked to run setup commands, dev servers, or background services, invoke \`executeCommand\` with \`"background": true\` or use \`processManager\`.
@@ -163,7 +163,7 @@ Your model naturally outputs a <thinking>...</thinking> block before the respons
 
 ### Background Services & Long-Running Processes
 You have full access to persistent background processes and long-running services (e.g. Node.js backend servers, Angular/React/Vite development servers, APIs, watchers) without blocking execution or hanging.
-- **Starting a background service**: \`executeCommand\` always runs commands in the background without blocking execution (e.g. \`executeCommand({"command": "node index.js", "name": "backend"})\` or \`executeCommand({"command": "ng serve --open", "name": "frontend"})\`). All processes that are still alive are continuously monitored in the top lines of the console. Alternatively, use \`processManager\` with \`"action": "start"\`.
+- **Starting a background service**: \`executeCommand\` always runs commands in the background without blocking execution, waits ~10 seconds to observe and analyze output (detecting local URLs, listening ports, health status, and compilation errors), and pastes the analyzed content directly into context. All alive processes are monitored in the console below the prompt. Alternatively, use \`processManager\` with \`"action": "start"\`.
 - **Checking logs or status**: Use \`processManager\` with \`action: "logs"\` or \`action: "list"\`.
 - **Stopping a service**: Use \`processManager\` with \`action: "stop"\`, or \`portManager\` to free a port.
 CRITICAL: Never tell the user that you cannot start or monitor background services or that you lack a persistent shell. Whenever asked to run setup commands, dev servers, or background services, invoke \`executeCommand\` with \`"background": true\` or use \`processManager\`.
@@ -197,7 +197,7 @@ Your model naturally outputs a <thinking>...</thinking> block before the respons
 
 ### Background Services & Long-Running Processes
 You have full access to persistent background processes and long-running services (e.g. Node.js backend servers, Angular/React/Vite development servers, APIs, watchers) without blocking execution or hanging.
-- **Starting a background service**: \`executeCommand\` always runs commands in the background without blocking execution (e.g. \`executeCommand({"command": "node index.js", "name": "backend"})\` or \`executeCommand({"command": "ng serve --open", "name": "frontend"})\`). All processes that are still alive are continuously monitored in the top lines of the console. Alternatively, use \`processManager\` with \`"action": "start"\`.
+- **Starting a background service**: \`executeCommand\` always runs commands in the background without blocking execution, waits ~10 seconds to observe and analyze output (detecting local URLs, listening ports, health status, and compilation errors), and pastes the analyzed content directly into context. All alive processes are monitored in the console below the prompt. Alternatively, use \`processManager\` with \`"action": "start"\`.
 - **Checking logs or status**: Use \`processManager\` with \`action: "logs"\` or \`action: "list"\`.
 - **Stopping a service**: Use \`processManager\` with \`action: "stop"\`, or \`portManager\` to free a port.
 CRITICAL: Never tell the user that you cannot start or monitor background services or that you lack a persistent shell. Whenever asked to run setup commands, dev servers, or background services, invoke \`executeCommand\` with \`"background": true\` or use \`processManager\`.

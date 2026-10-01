@@ -408,16 +408,22 @@ export const filesystemTools = {
 
   executeCommand: new FunctionTool({
     name: 'executeCommand',
-    description: 'Execute a terminal shell command within the workspace directory in the background. All commands (servers, dev watchers, scripts, builds, tests) are automatically launched in the background without blocking or hanging the assistant turn. The process is registered in the background process manager and monitored, returning immediately with processId, PID, initial startup logs, and log file location. Active background processes that are still alive are continuously monitored in the top lines of the console.',
+    description: 'Execute a terminal shell command within the workspace directory in the background. Commands are launched non-blockingly, observed for around 10 seconds to capture initial output and compilation logs, analyzed for URLs, ports, errors, and readiness, and pastes the complete analyzed output directly into the conversation context. All active background processes that are still alive are continuously monitored in the console below the prompt.',
     parameters: z.object({
       command: z.string().describe('The shell command to execute in the background (e.g. "npm test", "node server.js", "ng serve --open").'),
       background: z.boolean().optional().default(true).describe('Always true. Commands are always executed in the background as managed persistent services.'),
       name: z.string().optional().describe('Optional descriptive label for the background service (e.g. "backend", "frontend", "api-server"). Used to track and manage the process.'),
-      cwd: z.string().optional().describe('Optional working directory relative to workspace.')
+      cwd: z.string().optional().describe('Optional working directory relative to workspace.'),
+      waitMs: z.number().optional().default(10000).describe('Observation wait time in milliseconds (default: 10000 / 10s). The tool observes command output for this duration before analyzing and returning context.')
     }),
-    execute: async ({ command, background = true, name, cwd }) => {
-      // executeCommand is always executed in the background
-      return await startBackgroundProcess({ command, name, cwd });
+    execute: async ({ command, background = true, name, cwd, waitMs = 10000 }) => {
+      // executeCommand is always executed in the background and observed for around 10s
+      return await startBackgroundProcess({
+        command,
+        name,
+        cwd,
+        startupWaitMs: waitMs !== undefined ? waitMs : 10000
+      });
     }
   }),
 

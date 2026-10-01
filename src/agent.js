@@ -246,7 +246,7 @@ Format of the tool call inside your response:
   systemPrompt += `
 
 ### Background Process & Server Execution Guidance
-You have a persistent process management system and background execution environment. All commands executed via \`executeCommand\` ALWAYS run in the background as managed services without blocking execution, and any processes that are still alive are monitored continuously in real time in the top lines of the console. You can directly run and monitor long-running background servers (Node.js servers, Angular \`ng serve\`, React/Vite development servers, APIs, Python servers, daemons, watchers) in the background without blocking execution.
+You have a persistent process management system and background execution environment. All commands executed via \`executeCommand\` ALWAYS run in the background as managed services without blocking execution. The tool observes execution for around 10 seconds to collect startup logs, analyzes them for local URLs, listening ports, health status, and compilation errors, and pastes the complete analyzed output directly into the conversation context. Any active background processes that are still alive are monitored continuously in real time below the prompt in the console. You can directly run and monitor long-running background servers (Node.js servers, Angular \`ng serve\`, React/Vite development servers, APIs, Python servers, daemons, watchers) in the background without blocking execution.
 
 CRITICAL INSTRUCTIONS:
 1. **NEVER REFUSE**: Do NOT claim you cannot run persistent processes, lack a terminal, or lack background process management.

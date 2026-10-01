@@ -846,6 +846,17 @@ export function printToolResult(toolName, result) {
       if (result.logFile) {
         console.log(`  📄 ${pc.bold('Log File:')} ${pc.dim(result.logFile)}`);
       }
+      if (result.analysis) {
+        if (result.analysis.detectedUrls && result.analysis.detectedUrls.length > 0) {
+          console.log(`  🌐 ${pc.bold('Endpoints:')} ${pc.cyan(result.analysis.detectedUrls.join(', '))}`);
+        }
+        if (result.analysis.detectedPorts && result.analysis.detectedPorts.length > 0) {
+          console.log(`  🔌 ${pc.bold('Ports:')}     ${pc.yellow(result.analysis.detectedPorts.join(', '))}`);
+        }
+        if (result.analysis.summary) {
+          console.log(`  🔍 ${pc.bold('Analysis:')}  ${pc.magenta(result.analysis.summary)}`);
+        }
+      }
     }
     if (result.success === false) {
       console.log(pc.red(`\nExit Code: ${result.exitCode ?? 'Failed'}`));

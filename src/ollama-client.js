@@ -81,10 +81,13 @@ export function adkContentsToOllamaMessages(contents, systemInstruction) {
                   if (typeof obj[key] === 'string') {
                     // Strip ANSI escape codes to prevent tokenizer/prompt corruption in local Ollama
                     let sanitized = obj[key].replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-                    if (sanitized.length > 4000) {
-                      obj[key] = sanitized.slice(0, 1000) + 
-                                 `\n\n... [TRUNCATED ${sanitized.length - 2000} characters to protect local Ollama context window, full output printed directly in terminal above] ...\n\n` + 
-                                 sanitized.slice(-1000);
+                    const isCommandContentField = ['content', 'context', 'formattedContext', 'output', 'stdout', 'initialLogs', 'logs'].includes(key);
+                    const maxLen = isCommandContentField ? 12000 : 4000;
+                    if (sanitized.length > maxLen) {
+                      const sliceLen = isCommandContentField ? 2500 : 1000;
+                      obj[key] = sanitized.slice(0, sliceLen) + 
+                                 `\n\n... [TRUNCATED ${sanitized.length - (sliceLen * 2)} characters to protect local Ollama context window, full output printed directly in terminal above] ...\n\n` + 
+                                 sanitized.slice(-sliceLen);
                     } else {
                       obj[key] = sanitized;
                     }

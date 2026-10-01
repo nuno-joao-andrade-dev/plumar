@@ -5,7 +5,8 @@ import {
   getAliveBackgroundProcesses, 
   listBackgroundProcesses, 
   stopBackgroundProcess,
-  startBackgroundProcess
+  startBackgroundProcess,
+  analyzeCommandOutput
 } from '../src/tools/process-registry.js';
 import { 
   formatBackgroundProcessesMonitor, 
@@ -109,5 +110,81 @@ test('Background Execution & Top Lines Monitor Suite', async (t) => {
     assert.match(output, /monitor-test-proc/);
 
     await stopBackgroundProcess({ processId: s.processId });
+  });
+
+  await t.test('analyzeCommandOutput: should accurately extract URLs, ports, errors and format context block', () => {
+    const stdout = `
+Connected to SQLite database: reservations.db
+Table "reservations" is ready.
+Server running on http://localhost:3000
+API endpoints available at http://127.0.0.1:3000/api
+`;
+    const analysis = analyzeCommandOutput({
+      command: 'node index.js',
+      name: 'backend',
+      processId: 'proc-99',
+      pid: 12345,
+      stdout,
+      stderr: '',
+      isAlive: true,
+      exitCode: null,
+      observedMs: 10000
+    });
+
+    assert.strictEqual(analysis.status, 'running');
+    assert.strictEqual(analysis.hasErrors, false);
+    assert.ok(analysis.detectedUrls.includes('http://localhost:3000'));
+    assert.ok(analysis.detectedUrls.includes('http://127.0.0.1:3000/api'));
+    assert.ok(analysis.detectedPorts.includes(3000));
+    assert.match(analysis.summary, /backend.*started successfully.*http:\/\/localhost:3000/i);
+    assert.match(analysis.formattedContext, /### ⚙️ Command Execution & Output Analysis/);
+    assert.match(analysis.formattedContext, /http:\/\/localhost:3000/);
+    assert.match(analysis.formattedContext, /Table "reservations" is ready/);
+  });
+
+  await t.test('analyzeCommandOutput: should detect port conflict (EADDRINUSE) and syntax errors', () => {
+    const stderr = `
+Error: listen EADDRINUSE: address already in use :::3000
+    at Server.setupListenHandle [as _listen2] (node:net:1904:14)
+`;
+    const analysis = analyzeCommandOutput({
+      command: 'node index.js',
+      name: 'backend',
+      processId: 'proc-100',
+      pid: 12346,
+      stdout: '',
+      stderr,
+      isAlive: false,
+      exitCode: 1,
+      observedMs: 1200
+    });
+
+    assert.strictEqual(analysis.status, 'failed');
+    assert.strictEqual(analysis.hasErrors, true);
+    assert.match(analysis.errors[0], /EADDRINUSE/);
+    assert.match(analysis.summary, /EADDRINUSE/);
+    assert.match(analysis.formattedContext, /⚠️ Errors Detected|❌ FAILED/);
+  });
+
+  await t.test('executeCommand: should wait around 10s on long-running servers and return analysis and context content', async () => {
+    const start = Date.now();
+    const res = await tools.executeCommand.execute({
+      command: 'node -e "console.log(\'Server listening on http://localhost:8976\'); setInterval(() => {}, 1000)"',
+      name: 'test-http-server'
+    });
+    const elapsed = Date.now() - start;
+
+    assert.ok(elapsed >= 9500, `Expected elapsed time around 10s, got ${elapsed}ms`);
+    assert.strictEqual(res.success, true);
+    assert.strictEqual(res.status, 'running');
+    assert.ok(res.analysis, 'Should include analysis object');
+    assert.ok(res.analysis.detectedUrls.includes('http://localhost:8976'));
+    assert.ok(res.analysis.detectedPorts.includes(8976));
+    assert.ok(res.context, 'Should include context block');
+    assert.match(res.context, /http:\/\/localhost:8976/);
+    assert.match(res.content, /Server listening on http:\/\/localhost:8976/);
+    assert.strictEqual(res.analysis.hasErrors, false);
+
+    await stopBackgroundProcess({ processId: res.processId });
   });
 });
