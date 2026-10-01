@@ -9,6 +9,7 @@ This file outlines the complete set of instructions provided during our session,
 1. **New Tools Addition**: Add commonly needed developer tools that make sense, and create a new tool to launch/play a Chrome Dino-like game.
 2. **Rebranding**: Change the Dino Game's name and styling references from **"Antigravity Dino"** to **"plumar-cli Dino"**.
 3. **ADK Info Toggle**: Allow the user to enable/disable info (internal logging) from ADK (`@google/adk`), which should be disabled by default.
+4. **Immediate Thinking Process Execution Toggle (`executeThinking`)**: Allow the user to toggle immediate execution of the model's `<thinking>` process, automatically extracting and dispatching tool calls and background setup commands. Includes auto-recovery for execution hallucinations where models claim they started background processes without emitting a native tool call.
 
 ---
 
@@ -119,6 +120,40 @@ By default, internal verbose logging/telemetry from ADK (`@google/adk`) is **dis
    /adk-info
    ```
 4. **Diagnostics Verification**: View the current state of ADK logging using `/info` or `--info`.
+
+---
+
+## ⚡ Immediate Thinking Process Execution (`executeThinking`)
+
+When models reason in their `<thinking>...</thinking>` block, they frequently map out tool invocations, shell setup commands (like `cd backend && node index.js` or `cd frontend && ng serve --open`), and background processes. However, certain local models occasionally hallucinate that they have already started the background processes (e.g. printing `"I have executed the setup command... Status: The process full-stack-setup is running in the background (PID: 36569)"`) without emitting a native tool call.
+
+The **`executeThinking`** feature solves this through two powerful mechanisms:
+1. **Immediate Execution Toggle**: When enabled, Plumar directly extracts and dispatches tool calls and background shell commands planned during the thinking process.
+2. **Execution Hallucination Auto-Recovery**: Even when the toggle is off, Plumar detects when a model hallucinates running background servers or setup steps, extracting and executing the actual background commands from the conversation context and reasoning.
+
+### ⚙️ How to Toggle & Control Execute Thinking:
+1. **Interactive REPL Command**:
+   - Toggle on/off: `/execute-thinking` (or `/thinking-execute`)
+   - Turn on explicitly: `/execute-thinking on`
+   - Turn off explicitly: `/execute-thinking off`
+   - Execute previous turn's thinking immediately on-demand:
+     ```bash
+     /execute-thinking run
+     ```
+2. **Via Settings Slash Command**:
+   ```bash
+   /settings thinking on
+   /settings execute-thinking off
+   ```
+3. **Startup CLI Flag**:
+   ```bash
+   npm start -- --execute-thinking
+   ```
+4. **Environment Variable**: Set `EXECUTE_THINKING=true` or `PLUMAR_EXECUTE_THINKING=true`:
+   ```bash
+   EXECUTE_THINKING=true npm start
+   ```
+5. **Persistent Configuration**: Saved in `.plumar/settings.json` under `"executeThinking": true|false`.
 
 ---
 

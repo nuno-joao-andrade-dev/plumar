@@ -82,6 +82,9 @@ export function loadProviderSettings() {
         if (parsed.autoMinimize !== undefined) {
           autoMinimize = !!parsed.autoMinimize;
         }
+        if (parsed.executeThinking !== undefined) {
+          executeThinking = !!parsed.executeThinking;
+        }
       }
     } catch (err) {
       // ignore
@@ -112,6 +115,7 @@ export function saveProviderSettings() {
   parsed.ollamaAuth = ollamaAuth;
   parsed.lmStudioAuth = lmStudioAuth;
   parsed.autoMinimize = autoMinimize;
+  parsed.executeThinking = executeThinking;
 
   if (!parsed.provider) {
     parsed.provider = {};
@@ -137,6 +141,7 @@ let lmStudioHost = 'http://localhost:1234';
 let ollamaAuth = '';
 let lmStudioAuth = '';
 let autoMinimize = false;
+let executeThinking = false;
 
 // Load saved settings from settings file
 loadProviderSettings();
@@ -160,6 +165,11 @@ if (process.env.LMSTUDIO_AUTH) {
 if (process.env.AUTO_MINIMIZE) {
   autoMinimize = process.env.AUTO_MINIMIZE === 'true';
 }
+if (process.env.EXECUTE_THINKING !== undefined) {
+  executeThinking = process.env.EXECUTE_THINKING === 'true';
+} else if (process.env.PLUMAR_EXECUTE_THINKING !== undefined) {
+  executeThinking = process.env.PLUMAR_EXECUTE_THINKING === 'true';
+}
 
 // Keep process.env in sync
 process.env.LLM_PROVIDER = llmProvider;
@@ -168,6 +178,7 @@ process.env.LMSTUDIO_HOST = lmStudioHost;
 process.env.OLLAMA_AUTH = ollamaAuth;
 process.env.LMSTUDIO_AUTH = lmStudioAuth;
 process.env.AUTO_MINIMIZE = String(autoMinimize);
+process.env.EXECUTE_THINKING = String(executeThinking);
 
 export function isAutoMinimizeEnabled() {
   return autoMinimize;
@@ -176,6 +187,16 @@ export function isAutoMinimizeEnabled() {
 export function setAutoMinimizeEnabled(enabled) {
   autoMinimize = !!enabled;
   process.env.AUTO_MINIMIZE = String(autoMinimize);
+  saveProviderSettings();
+}
+
+export function isExecuteThinkingEnabled() {
+  return executeThinking;
+}
+
+export function setExecuteThinkingEnabled(enabled) {
+  executeThinking = !!enabled;
+  process.env.EXECUTE_THINKING = String(executeThinking);
   saveProviderSettings();
 }
 

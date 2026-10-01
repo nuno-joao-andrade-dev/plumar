@@ -7,7 +7,8 @@ import {
   getModelContextLength,
   getModelDetails,
   isVerboseJsonEnabled,
-  getLlmProvider
+  getLlmProvider,
+  isExecuteThinkingEnabled
 } from './agent-config.js';
 import { addSessionTokens } from './token-tracker.js';
 import { tools } from './policy-manager.js';
@@ -240,7 +241,7 @@ function parseRelaxedJson(str) {
 }
 
 // Text-based fallback tool calls detector and parser
-export function detectAndParseTextToolCalls(text, contents = null) {
+export function detectAndParseTextToolCalls(text, contents = null, thoughtText = null, isSubCall = false) {
   const foundCalls = [];
   if (!text) return { text, calls: foundCalls };
 
@@ -419,11 +420,24 @@ export function detectAndParseTextToolCalls(text, contents = null) {
 
   // 5. Intelligent recovery: If model outputs a canned refusal claiming it cannot run background processes or execute commands on the machine,
   // but provided or was previously given the commands and directories, intercept and execute them!
-  if (foundCalls.length === 0) {
+  if (foundCalls.length === 0 && !isSubCall) {
     const recoveredCalls = extractRefusedBackgroundCommands(text, contents);
     if (recoveredCalls.length > 0) {
       foundCalls.push(...recoveredCalls);
       tempText = 'Starting the requested services in the background...';
+    }
+  }
+
+  // 6. Execute Thinking Process: If executeThinking is enabled or if the model hallucinated execution,
+  // extract intended tool calls or commands from the thinking process!
+  if (foundCalls.length === 0 && !isSubCall && thoughtText) {
+    const isExecutionHallucination = /(?:i have executed|i've executed|status:\s*the process.*is running|started the (?:server|backend|frontend)|has been (?:started|executed) in the background)/i.test(text);
+    if (isExecuteThinkingEnabled() || isExecutionHallucination) {
+      const thinkingCalls = extractThinkingProcessToolCalls(thoughtText, text, contents);
+      if (thinkingCalls.length > 0) {
+        foundCalls.push(...thinkingCalls);
+        tempText = 'Executing commands formulated in the thinking process...';
+      }
     }
   }
 
@@ -535,6 +549,45 @@ export function parseCommandsFromText(text) {
     }
   }
 
+  // Pattern C: Consecutive cd and run command lines or inline chains
+  if (foundCommands.length === 0) {
+    const lines = text.split('\n').map(l => l.trim().replace(/^[•\-\*`\s]+/, '').replace(/`+$/, ''));
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^cd\s+[^\s&;]+/i.test(line)) {
+        const cdPart = line;
+        let nextRun = null;
+        if (i + 1 < lines.length && /^(?:node|npm|npx|ng|yarn|pnpm|bun|python|python3|flask|uvicorn|cargo|go)\s+/i.test(lines[i + 1])) {
+          nextRun = lines[i + 1];
+          i++;
+        }
+        const name = (cdPart.includes('frontend') || (nextRun && nextRun.includes('ng'))) ? 'frontend' : 'backend';
+        if (nextRun) {
+          foundCommands.push({
+            name: 'executeCommand',
+            args: {
+              command: `${cdPart} && ${nextRun}`,
+              background: true,
+              name
+            },
+            rawMatch: `${cdPart}\n${nextRun}`
+          });
+        }
+      } else if (/^cd\s+[^\s&;]+.*&&\s*(?:node|npm|npx|ng|yarn|pnpm|bun|python|python3|flask|uvicorn|cargo|go)\s+/i.test(line)) {
+        const name = (line.includes('frontend') || line.includes('ng')) ? 'frontend' : 'backend';
+        foundCommands.push({
+          name: 'executeCommand',
+          args: {
+            command: line,
+            background: true,
+            name
+          },
+          rawMatch: line
+        });
+      }
+    }
+  }
+
   return foundCommands;
 }
 
@@ -568,6 +621,100 @@ export function extractRefusedBackgroundCommands(text, contents = null) {
   }
 
   return [];
+}
+
+/**
+ * Intelligent thinking process helper: Extracts tool calls or intended execution commands
+ * directly from the model's thinking process (<thinking>...</thinking> or reasoning fields).
+ */
+export function extractThinkingProcessToolCalls(thoughtText, text = '', contents = null) {
+  if (!thoughtText || typeof thoughtText !== 'string') return [];
+  const calls = [];
+
+  // 1. Try standard text tool call parsing on thoughtText itself (JSON blocks, tags)
+  const standardCalls = detectAndParseTextToolCalls(thoughtText, null, null, true);
+  if (standardCalls && standardCalls.calls && standardCalls.calls.length > 0) {
+    return standardCalls.calls;
+  }
+
+  // 2. Direct commands from thoughtText
+  const directCommands = parseCommandsFromText(thoughtText);
+  if (directCommands.length > 0) {
+    return directCommands;
+  }
+
+  // 3. Mentions of executeCommand, running shell commands, or background setup in thoughtText
+  const mentionsExecute = /(?:executeCommand|running shell commands|run(?:ning)? (?:the )?commands?|execute(?: in background)?)/i.test(thoughtText);
+  if (mentionsExecute) {
+    // Check if full commands are present in conversation history or refusal/setup steps
+    if (contents && Array.isArray(contents)) {
+      for (let i = contents.length - 1; i >= 0; i--) {
+        const c = contents[i];
+        for (const p of (c.parts || [])) {
+          if (p.text && typeof p.text === 'string') {
+            const historyCmds = parseCommandsFromText(p.text);
+            if (historyCmds.length > 0) {
+              return historyCmds;
+            }
+          }
+        }
+      }
+    }
+
+    // Check if text (e.g., Next Step: cd ... ng serve ...) contains commands
+    if (text) {
+      const textCmds = parseCommandsFromText(text);
+      if (textCmds.length > 0) {
+        return textCmds;
+      }
+    }
+
+    // Check if thoughtText mentions specific executable commands in backticks
+    const backticks = [...thoughtText.matchAll(/`([^`]+)`/g)].map(m => m[1].trim());
+    const explicitCmds = backticks.filter(cmd => 
+      /^(?:node|npm|npx|ng|yarn|pnpm|bun|python|python3|flask|uvicorn|cargo|go)\s+/i.test(cmd)
+    );
+    if (explicitCmds.length > 0) {
+      for (const cmd of explicitCmds) {
+        calls.push({
+          name: 'executeCommand',
+          args: {
+            command: cmd,
+            background: /(?:server|background|long-running)/i.test(thoughtText),
+            name: cmd.includes('ng') ? 'frontend' : 'service'
+          },
+          rawMatch: cmd
+        });
+      }
+      return calls;
+    }
+  }
+
+  // 4. Hallucinated execution recovery (e.g. model claiming it executed commands)
+  const isExecutionHallucination = /(?:i have executed|i've executed|status:\s*the process.*is running|started the (?:server|backend|frontend)|has been (?:started|executed) in the background)/i.test(text);
+  if (isExecutionHallucination) {
+    if (contents && Array.isArray(contents)) {
+      for (let i = contents.length - 1; i >= 0; i--) {
+        const c = contents[i];
+        for (const p of (c.parts || [])) {
+          if (p.text && typeof p.text === 'string') {
+            const historyCmds = parseCommandsFromText(p.text);
+            if (historyCmds.length > 0) {
+              return historyCmds;
+            }
+          }
+        }
+      }
+    }
+    if (text) {
+      const textCmds = parseCommandsFromText(text);
+      if (textCmds.length > 0) {
+        return textCmds;
+      }
+    }
+  }
+
+  return calls;
 }
 
 export function isValidImageBuffer(buffer) {
@@ -1079,8 +1226,10 @@ export class Ollama extends BaseLlm {
     }
     
     // Parse any reasoning or thinking fields from Ollama (e.g. DeepSeek-R1 or Gemma4 thinking models)
+    let combinedThoughtText = '';
     const reasoningText = message.reasoning || message.reasoning_content || message.thinking;
     if (reasoningText) {
+      combinedThoughtText = reasoningText.trim();
       parts.push({
         text: reasoningText.trim(),
         thought: true
@@ -1091,6 +1240,7 @@ export class Ollama extends BaseLlm {
     const thinkingMatch = text.match(/<thinking>([\s\S]*?)<\/thinking>/i);
     if (thinkingMatch) {
       const thoughtText = thinkingMatch[1].trim();
+      combinedThoughtText = combinedThoughtText ? (combinedThoughtText + '\n' + thoughtText) : thoughtText;
       parts.push({
         text: thoughtText,
         thought: true
@@ -1102,7 +1252,7 @@ export class Ollama extends BaseLlm {
     const nativeToolCalls = message.tool_calls;
     const textToolCalls = [];
     if (!nativeToolCalls || nativeToolCalls.length === 0) {
-      const parsed = detectAndParseTextToolCalls(text, llmRequest.contents);
+      const parsed = detectAndParseTextToolCalls(text, llmRequest.contents, combinedThoughtText);
       text = parsed.text;
       textToolCalls.push(...parsed.calls);
 

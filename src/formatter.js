@@ -414,6 +414,7 @@ export function printHelp(topic) {
   console.log(`  ${pc.yellow('/info')}         - Display current session diagnostics.`);
   console.log(`  ${pc.yellow('/verbose')}      - Toggle verbose JSON payload logging (disabled by default).`);
   console.log(`  ${pc.yellow('/adk-info')}     - Toggle ADK internal event logging (disabled by default).`);
+  console.log(`  ${pc.yellow('/execute-thinking')} - Toggle or run thinking process execution immediately (/execute-thinking run).`);
   console.log(`  ${pc.yellow('/policy')}       - View or configure allow/ask/deny execution rules for tools.`);
   console.log(`  ${pc.yellow('/settings')}     - View or dynamically switch settings (e.g. LLM Provider, Host, Auth).`);
   console.log(`  ${pc.yellow('/clear')}        - Clear terminal console and wipe conversation history.`);

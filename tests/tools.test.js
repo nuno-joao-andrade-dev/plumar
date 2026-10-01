@@ -5,7 +5,8 @@ import path from 'path';
 import { tools } from '../src/tools.js';
 import { Jimp } from 'jimp';
 import { wrapFunctionTool, resetTurnToolHistory } from '../src/policy-manager.js';
-import { detectAndParseTextToolCalls } from '../src/ollama-client.js';
+import { detectAndParseTextToolCalls, extractThinkingProcessToolCalls } from '../src/ollama-client.js';
+import { isExecuteThinkingEnabled, setExecuteThinkingEnabled } from '../src/agent-config.js';
 
 test('1. calculator tool', async (t) => {
   await t.test('should evaluate simple math expression', async () => {
@@ -1428,6 +1429,77 @@ This is the standard procedure for running full-stack applications.`;
     assert.strictEqual(parsed.calls[1].args.background, true);
     assert.strictEqual(parsed.calls[1].args.name, 'frontend');
     assert.match(parsed.calls[1].args.command, /cd .*frontend && ng serve --open/);
+  });
+
+  await t.test('executeThinking toggle setting: can enable and disable dynamically', () => {
+    const initial = isExecuteThinkingEnabled();
+    setExecuteThinkingEnabled(true);
+    assert.strictEqual(isExecuteThinkingEnabled(), true);
+    assert.strictEqual(process.env.EXECUTE_THINKING, 'true');
+
+    setExecuteThinkingEnabled(false);
+    assert.strictEqual(isExecuteThinkingEnabled(), false);
+    assert.strictEqual(process.env.EXECUTE_THINKING, 'false');
+
+    setExecuteThinkingEnabled(initial);
+  });
+
+  await t.test('detectAndParseTextToolCalls: intercepts execution hallucination and extracts commands from thinking process', () => {
+    const thinking = `The user is asking to execute the "Backend Setup & Run" steps in the background. This involves running shell commands (\`cd\`, \`npm install\`, \`node index.js\`). I must use the \`executeCommand\` tool for this, ensuring \`background: true\` is set as these are long-running processes (a server).`;
+    const responseText = `I have executed the combined setup command for the backend, which includes installing dependencies and starting the server in the background.
+
+  Status: The process full-stack-setup is running in the background (PID: 36569).
+
+  Next Step: Please navigate to your frontend directory and run:
+
+    cd /home/nandrade/projects/nja.dev/tst/frontend
+    ng serve --open`;
+
+    const sampleHistory = [
+      {
+        role: 'user',
+        parts: [{ text: '1. Backend: cd /home/nandrade/projects/nja.dev/tst/backend && node index.js' }]
+      }
+    ];
+
+    const parsed = detectAndParseTextToolCalls(responseText, sampleHistory, thinking);
+    assert.ok(parsed.calls.length >= 1, 'Should extract at least one tool call');
+    assert.strictEqual(parsed.calls[0].name, 'executeCommand');
+    assert.strictEqual(parsed.calls[0].args.background, true);
+    assert.match(parsed.calls[0].args.command, /backend.*node index\.js|frontend.*ng serve/);
+  });
+
+  await t.test('detectAndParseTextToolCalls: executes thinking process immediately when executeThinking is enabled', () => {
+    const initial = isExecuteThinkingEnabled();
+    try {
+      setExecuteThinkingEnabled(true);
+      const thinking = `1. \`executeCommand\` to set up Angular CLI and create the app (\`ng new frontend --defaults\`)
+2. \`executeCommand\` to install dependencies in \`frontend\` (\`npm install\`)`;
+      const responseText = `Here is the plan for setting up the frontend application.`;
+
+      const parsed = detectAndParseTextToolCalls(responseText, null, thinking);
+      assert.ok(parsed.calls.length >= 1, 'Should extract tool calls from thinking');
+      assert.strictEqual(parsed.calls[0].name, 'executeCommand');
+      assert.strictEqual(parsed.calls[0].args.command, 'ng new frontend --defaults');
+    } finally {
+      setExecuteThinkingEnabled(initial);
+    }
+  });
+
+  await t.test('extractThinkingProcessToolCalls: should parse embedded JSON tool call in thinking block', () => {
+    const thinking = `I need to check the directory contents.
+\`\`\`json
+{
+  "name": "listFiles",
+  "arguments": {
+    "directory": "."
+  }
+}
+\`\`\``;
+    const calls = extractThinkingProcessToolCalls(thinking);
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].name, 'listFiles');
+    assert.deepStrictEqual(calls[0].args, { directory: '.' });
   });
 });
 

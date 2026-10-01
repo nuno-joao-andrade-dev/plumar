@@ -983,15 +983,15 @@ test('Agent Integration Suite (Real-World Use Cases)', async (t) => {
 
     try {
       await runAgentTurn('test-bg-prompt', 'execute task in background', 'gemma4:latest', 'balanced');
-      assert.ok(capturedSystemPrompt.includes('Background Process and Execution Guidance'), 'System prompt should include background guidance');
-      assert.ok(capturedSystemPrompt.includes('YOU CAN RUN BACKGROUND COMMANDS'), 'System prompt should explain background execution capabilities');
+      assert.ok(capturedSystemPrompt.includes('Background Process & Server Execution Guidance'), 'System prompt should include background guidance');
+      assert.ok(capturedSystemPrompt.includes('NEVER REFUSE'), 'System prompt should explain background execution capabilities');
     } finally {
       globalThis.fetch = previousFetch;
     }
   });
 
   await t.test('Use Case 16: detectAndParseTextToolCalls should successfully match and parse history-style tool calls', () => {
-    const text = 'Balanced Assistant ›    [Agent Tool Call: Executed "executeCommand" with args: {"command":"echo \'nja\'"}]';
+    const text = 'Balanced Assistant ›    [Agent Tool Call: "executeCommand" with args: {"command":"echo \'nja\'"}]';
     const parsed = detectAndParseTextToolCalls(text);
     
     assert.strictEqual(parsed.calls.length, 1);

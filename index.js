@@ -75,7 +75,8 @@ export async function executePipeCommand(command, abortSignal) {
   }
 }
 
-import { runAgentTurn, tools, fetchOllamaModels, CHAT_MODES, getDefaultChatMode, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, getSessionTokens, castParameter, getLlmProvider, setLlmProvider, getOllamaHost, setOllamaHost, getLmStudioHost, setLmStudioHost, getLmStudioAuth, setLmStudioAuth, isAutoMinimizeEnabled, setAutoMinimizeEnabled } from './src/agent.js';
+import { runAgentTurn, tools, fetchOllamaModels, CHAT_MODES, getDefaultChatMode, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, getSessionTokens, castParameter, getLlmProvider, setLlmProvider, getOllamaHost, setOllamaHost, getLmStudioHost, setLmStudioHost, getLmStudioAuth, setLmStudioAuth, isAutoMinimizeEnabled, setAutoMinimizeEnabled, isExecuteThinkingEnabled, setExecuteThinkingEnabled } from './src/agent.js';
+import { extractThinkingProcessToolCalls } from './src/ollama-client.js';
 import { loadAndStartMcpServers, getMcpTools } from './src/mcp-client-manager.js';
 import { 
   printBanner, 
@@ -208,6 +209,7 @@ export function displaySettingsTable() {
     { label: 'LLM Provider', value: providerName },
     { label: `${providerName} Endpoint`, value: getOllamaBaseUrl() },
     { label: `${providerName} Auth`, value: getOllamaAuth() ? '****** (Configured)' : 'None' },
+    { label: 'Execute Thinking', value: isExecuteThinkingEnabled() ? 'ON' : 'OFF' },
     { label: 'Verbose JSON Logs', value: isVerboseJsonEnabled() ? 'ON' : 'OFF' },
     { label: 'ADK Info Logs', value: isAdkInfoEnabled() ? 'ON' : 'OFF' },
     { label: 'Default Tool Policy', value: getDefaultPolicy().toUpperCase() },
@@ -441,6 +443,11 @@ async function main() {
     setAdkInfoEnabled(true);
   }
 
+  // Parse execute thinking flags
+  if (process.argv.includes('--execute-thinking') || process.argv.includes('--enable-execute-thinking')) {
+    setExecuteThinkingEnabled(true);
+  }
+
   // Parse tool policy config file first
   let policyConfigPath = null;
   const configIndex = process.argv.findIndex(arg => arg === '--policy-config');
@@ -528,6 +535,7 @@ async function main() {
         serverEndpoint: getOllamaBaseUrl(),
         verboseJsonLogs: isVerboseJsonEnabled(),
         adkInfoLogs: isAdkInfoEnabled(),
+        executeThinking: isExecuteThinkingEnabled(),
         session: null
       }, null, 2));
       console.log();
@@ -542,6 +550,7 @@ async function main() {
         { label: 'Workspace Root', value: process.cwd() },
         { label: 'LLM Provider', value: providerName },
         { label: `${providerName} Endpoint`, value: getOllamaBaseUrl() },
+        { label: 'Execute Thinking', value: isExecuteThinkingEnabled() ? 'ON' : 'OFF' },
         { label: 'Verbose JSON Logs', value: isVerboseJsonEnabled() ? 'ON' : 'OFF' },
         { label: 'ADK Info Logs', value: isAdkInfoEnabled() ? 'ON' : 'OFF' }
       ];
@@ -996,6 +1005,8 @@ async function main() {
   }
 
   let mcpLoaded = false;
+  let lastTurnThinking = '';
+  let lastTurnResponseText = '';
 
   // 2. Launch Main Interface
   console.clear();
@@ -1436,6 +1447,7 @@ export const tool = new FunctionTool({
               serverAuth: getOllamaAuth() ? '******' : 'None',
               verboseJsonLogs: isVerboseJsonEnabled(),
               adkInfoLogs: isAdkInfoEnabled(),
+              executeThinking: isExecuteThinkingEnabled(),
               session
             }, null, 2));
             console.log();
@@ -1452,6 +1464,7 @@ export const tool = new FunctionTool({
               { label: 'LLM Provider', value: providerName },
               { label: `${providerName} Endpoint`, value: getOllamaBaseUrl() },
               { label: `${providerName} Auth`, value: getOllamaAuth() ? '****** (Configured)' : 'None' },
+              { label: 'Execute Thinking', value: isExecuteThinkingEnabled() ? 'ON' : 'OFF' },
               { label: 'Verbose JSON Logs', value: isVerboseJsonEnabled() ? 'ON' : 'OFF' },
               { label: 'ADK Info Logs', value: isAdkInfoEnabled() ? 'ON' : 'OFF' }
             ];
@@ -1473,6 +1486,56 @@ export const tool = new FunctionTool({
           setAdkInfoEnabled(!current);
           console.log(pc.green(`ADK internal info logging is now ${pc.bold(isAdkInfoEnabled() ? 'ENABLED' : 'DISABLED')}.\n`));
           displaySettingsTable();
+          continue;
+        }
+
+        else if (command === '/execute-thinking' || command === '/thinking-execute') {
+          const action = (arg || '').trim().toLowerCase();
+          if (['on', 'enable', 'true', 'yes'].includes(action)) {
+            setExecuteThinkingEnabled(true);
+            console.log(pc.green(`⚡ ${pc.bold('Execute Thinking enabled')}: Plumar will automatically parse and execute tool calls or commands formulated in the thinking process.\n`));
+            displaySettingsTable();
+          } else if (['off', 'disable', 'false', 'no'].includes(action)) {
+            setExecuteThinkingEnabled(false);
+            console.log(pc.yellow(`${pc.bold('Execute Thinking disabled')}: The thinking process will remain thought-only and will not automatically execute.\n`));
+            displaySettingsTable();
+          } else if (['run', 'now', 'exec', 'execute'].includes(action)) {
+            if (!lastTurnThinking) {
+              console.log(pc.yellow(`No thinking process recorded from the previous turn to execute.\n`));
+            } else {
+              console.log(pc.cyan(`⚡ Extracting and executing actions from the previous thinking process...\n`));
+              const calls = extractThinkingProcessToolCalls(lastTurnThinking, lastTurnResponseText);
+              if (calls.length === 0) {
+                console.log(pc.yellow(`No executable commands or tool calls found in the previous thinking process.\n`));
+              } else {
+                for (const call of calls) {
+                  const toolFn = tools[call.name];
+                  if (toolFn) {
+                    console.log(pc.bold(pc.cyan(`▶ Executing ${call.name}:`)), call.args);
+                    try {
+                      const res = await toolFn(call.args);
+                      console.log(pc.green(`✔ ${call.name} result:`), typeof res === 'object' ? JSON.stringify(res, null, 2) : res);
+                    } catch (toolErr) {
+                      console.log(pc.red(`✖ ${call.name} error:`), toolErr.message);
+                    }
+                  } else {
+                    console.log(pc.yellow(`Tool "${call.name}" is not registered.`));
+                  }
+                }
+                console.log();
+              }
+            }
+          } else {
+            // Toggle
+            const newState = !isExecuteThinkingEnabled();
+            setExecuteThinkingEnabled(newState);
+            if (newState) {
+              console.log(pc.green(`⚡ ${pc.bold('Execute Thinking enabled')}: Plumar will automatically parse and execute tool calls or commands formulated in the thinking process.\n`));
+            } else {
+              console.log(pc.yellow(`${pc.bold('Execute Thinking disabled')}: The thinking process will remain thought-only and will not automatically execute.\n`));
+            }
+            displaySettingsTable();
+          }
           continue;
         } 
 
@@ -1588,6 +1651,18 @@ export const tool = new FunctionTool({
                 console.log(pc.green(`ADK Info logs toggled to: ${pc.bold(isAdkInfoEnabled() ? 'ON' : 'OFF')}\n`));
               }
               displaySettingsTable();
+            } else if (key === 'execute-thinking' || key === 'thinking') {
+              if (['on', 'true', 'yes', 'enable'].includes(value.toLowerCase())) {
+                setExecuteThinkingEnabled(true);
+                console.log(pc.green(`Execute Thinking enabled.\n`));
+              } else if (['off', 'false', 'no', 'disable'].includes(value.toLowerCase())) {
+                setExecuteThinkingEnabled(false);
+                console.log(pc.green(`Execute Thinking disabled.\n`));
+              } else {
+                setExecuteThinkingEnabled(!isExecuteThinkingEnabled());
+                console.log(pc.green(`Execute Thinking toggled to: ${pc.bold(isExecuteThinkingEnabled() ? 'ON' : 'OFF')}\n`));
+              }
+              displaySettingsTable();
             } else if (key === 'policy') {
               if (['allow', 'ask', 'deny'].includes(value.toLowerCase())) {
                 setDefaultPolicy(value.toLowerCase());
@@ -1597,7 +1672,7 @@ export const tool = new FunctionTool({
                 console.log(pc.red(`Invalid policy. Choose from: allow, ask, deny\n`));
               }
             } else {
-              console.log(pc.red(`Unknown settings key: "${key}".\nAvailable keys: ollama, auth, verbose, adk-info, policy\n`));
+              console.log(pc.red(`Unknown settings key: "${key}".\nAvailable keys: ollama, auth, verbose, adk-info, execute-thinking, policy\n`));
             }
           }
           continue;
@@ -2042,7 +2117,9 @@ export const tool = new FunctionTool({
           console.log(pc.dim(`      If generation is slow, run the ${pc.yellow('/minimize')} command to prune and compress history.`));
         }
 
-        const { text, steps } = await runAgentTurn(sessionId, finalPrompt, activeModel, activeMode, controller.signal, activeTemperature, activeParameters);
+        const { text, steps, thinkingText } = await runAgentTurn(sessionId, finalPrompt, activeModel, activeMode, controller.signal, activeTemperature, activeParameters);
+        lastTurnThinking = thinkingText || '';
+        lastTurnResponseText = text || '';
 
         if (controller.signal.aborted) {
           throw new Error('Request cancelled by user (ESC)');

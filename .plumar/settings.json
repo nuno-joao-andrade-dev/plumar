@@ -43,5 +43,6 @@
     "ollamaAuth": "",
     "lmStudioAuth": ""
   },
-  "autoMinimize": false
+  "autoMinimize": false,
+  "executeThinking": false
 }

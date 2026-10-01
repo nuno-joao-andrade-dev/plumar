@@ -24,7 +24,9 @@ import {
   getLmStudioAuth,
   setLmStudioAuth,
   isAutoMinimizeEnabled,
-  setAutoMinimizeEnabled
+  setAutoMinimizeEnabled,
+  isExecuteThinkingEnabled,
+  setExecuteThinkingEnabled
 } from './agent-config.js';
 
 import {
@@ -86,6 +88,8 @@ export {
   setLmStudioAuth,
   isAutoMinimizeEnabled,
   setAutoMinimizeEnabled,
+  isExecuteThinkingEnabled,
+  setExecuteThinkingEnabled,
   tools,
   registerMcpTools,
   setReadlineInterface,
@@ -396,9 +400,25 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
     throw err;
   }
 
+  let thinkingText = '';
+  for (const step of steps) {
+    if (step.type === 'thought' && step.content) {
+      if (Array.isArray(step.content)) {
+        for (const item of step.content) {
+          if (item && item.text) thinkingText += item.text + '\n';
+        }
+      } else if (Array.isArray(step.content.parts)) {
+        for (const part of step.content.parts) {
+          thinkingText += (part.text || '') + '\n';
+        }
+      }
+    }
+  }
+
   return {
     text: finalResponseText,
-    steps: steps
+    steps: steps,
+    thinkingText: thinkingText.trim()
   };
 }
 
