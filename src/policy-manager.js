@@ -241,7 +241,7 @@ export function wrapFunctionTool(toolObj) {
       }
 
       // If a file-writing / idempotent mutation tool is called a second time with identical arguments
-      const isWriteTool = ['writeFile', 'writeBinaryFile', 'writeMarkdown', 'appendFile', 'searchReplace'].includes(toolObj.name);
+      const isWriteTool = ['writeFile', 'writeBinaryFile', 'writeMarkdown', 'appendFile', 'searchReplace', 'codeFixer'].includes(toolObj.name);
       if (duplicateCount === 1 && isWriteTool) {
         activeTurnToolHistory.push(toolSignature);
         const cachedSuccess = {

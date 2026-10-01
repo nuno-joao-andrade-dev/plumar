@@ -3,7 +3,7 @@ import { z } from 'zod';
 import fs from 'fs/promises';
 import path from 'path';
 import { exec, spawn } from 'child_process';
-import { resolveSafePath, WORKSPACE_DIR } from './core-helper.js';
+import { resolveSafePath, WORKSPACE_DIR, setLastWorkspaceFile } from './core-helper.js';
 import { startBackgroundProcess } from './process-registry.js';
 
 export const filesystemTools = {
@@ -79,6 +79,7 @@ export const filesystemTools = {
         }
         
         const content = await fs.readFile(targetPath, 'utf-8');
+        setLastWorkspaceFile(filePath);
         const isTruncated = content.length > 10000;
         const resultText = isTruncated ? content.slice(0, 10000) + '\n[... TRUNCATED DUE TO SIZE LIMIT ...]' : content;
         
@@ -116,6 +117,7 @@ export const filesystemTools = {
         await fs.mkdir(path.dirname(targetPath), { recursive: true });
         
         await fs.writeFile(targetPath, content, 'utf-8');
+        setLastWorkspaceFile(filePath);
         const stats = await fs.stat(targetPath);
         
         return {
@@ -154,6 +156,7 @@ export const filesystemTools = {
         
         const buffer = Buffer.from(content, encoding);
         await fs.writeFile(targetPath, buffer);
+        setLastWorkspaceFile(filePath);
         const stats = await fs.stat(targetPath);
         
         return {
@@ -189,6 +192,7 @@ export const filesystemTools = {
         await fs.mkdir(path.dirname(targetPath), { recursive: true });
         
         await fs.appendFile(targetPath, content, 'utf-8');
+        setLastWorkspaceFile(filePath);
         const stats = await fs.stat(targetPath);
         
         return {
@@ -525,12 +529,27 @@ export const filesystemTools = {
     name: 'searchReplace',
     description: 'Find and replace a specific string or pattern inside a file in the workspace.',
     parameters: z.object({
-      filePath: z.string().describe('The relative path of the file to modify'),
-      findText: z.string().describe('The exact text block to search for and replace'),
-      replaceText: z.string().describe('The text block to replace the search match with'),
+      filePath: z.string().optional().describe('The relative path of the file to modify'),
+      path: z.string().optional().describe('Alternative parameter name for filePath'),
+      findText: z.string().optional().describe('The exact text block to search for and replace'),
+      find: z.string().optional().describe('Alternative parameter name for findText'),
+      search: z.string().optional().describe('Alternative parameter name for findText'),
+      replaceText: z.string().optional().describe('The text block to replace the search match with'),
+      replace: z.string().optional().describe('Alternative parameter name for replaceText'),
+      content: z.string().optional().describe('Alternative parameter name for replaceText'),
     }),
-    execute: async ({ filePath, findText, replaceText }) => {
+    execute: async (args = {}) => {
       try {
+        const filePath = args.filePath || args.path || getLastWorkspaceFile();
+        if (!filePath) {
+          return { success: false, error: 'Missing required parameter: filePath or path' };
+        }
+        const findText = args.findText !== undefined ? args.findText : (args.find !== undefined ? args.find : args.search);
+        if (findText === undefined) {
+          return { success: false, error: 'Missing required parameter: findText, find, or search' };
+        }
+        const replaceText = args.replaceText !== undefined ? args.replaceText : (args.replace !== undefined ? args.replace : (args.content !== undefined ? args.content : ''));
+
         const targetPath = resolveSafePath(filePath);
         const stats = await fs.stat(targetPath);
         if (!stats.isFile()) {
@@ -542,6 +561,7 @@ export const filesystemTools = {
         }
         const updatedContent = content.replace(findText, replaceText);
         await fs.writeFile(targetPath, updatedContent, 'utf-8');
+        setLastWorkspaceFile(filePath);
         return {
           success: true,
           filePath,

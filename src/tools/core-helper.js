@@ -37,3 +37,20 @@ export function parseHexColor(hex) {
   }
   return parseInt(clean, 16) >>> 0;
 }
+
+let lastWorkspaceFile = null;
+
+export function setLastWorkspaceFile(filePath) {
+  if (filePath && typeof filePath === 'string') {
+    lastWorkspaceFile = filePath;
+  }
+}
+
+export function getLastWorkspaceFile() {
+  return lastWorkspaceFile;
+}
+
+export function resetLastWorkspaceFile() {
+  lastWorkspaceFile = null;
+}
+

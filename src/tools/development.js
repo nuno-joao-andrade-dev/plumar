@@ -3,7 +3,7 @@ import { z } from 'zod';
 import fs from 'fs/promises';
 import path from 'path';
 import { exec } from 'child_process';
-import { resolveSafePath, WORKSPACE_DIR } from './core-helper.js';
+import { resolveSafePath, WORKSPACE_DIR, setLastWorkspaceFile, getLastWorkspaceFile } from './core-helper.js';
 import {
   startBackgroundProcess,
   listBackgroundProcesses,
@@ -700,12 +700,23 @@ export const developmentTools = {
     name: 'codeFixer',
     description: 'High-performance, multi-language code fixer tool. Supports multi-line search & replace, insertion anchors, escape sequence unescaping, line-range targeting, whole-file overwriting, appending, dry-run simulations, and automatic formatting/linting fallback.',
     parameters: z.object({
-      filePath: z.string().optional().describe('The relative or absolute path of the file to modify inside the workspace.'),
+      filePath: z.string().optional().describe('The relative or absolute path of the file to modify inside the workspace (e.g. "backend/index.js"). Required when performing operations.'),
+      path: z.string().optional().describe('Alternative parameter name for filePath'),
+      file: z.string().optional().describe('Alternative parameter name for filePath'),
+      filename: z.string().optional().describe('Alternative parameter name for filePath'),
+      targetFile: z.string().optional().describe('Alternative parameter name for filePath'),
       operations: z.array(z.object({
         action: z.enum(['replace', 'insert_before', 'insert_after', 'write', 'append']).describe('The action to perform on the target file section.'),
         search: z.string().optional().describe('The code block or pattern to match. Optional for "replace", "insert_before", or "insert_after"; if omitted, the entire targeted section (anchors/lines/file) is used as the match.'),
-        replace: z.string().optional().describe('The replacement code content (required for "replace").'),
-        content: z.string().optional().describe('The content to write, append, or insert.'),
+        find: z.string().optional().describe('Alternative parameter name for search'),
+        findText: z.string().optional().describe('Alternative parameter name for search'),
+        pattern: z.string().optional().describe('Alternative parameter name for search'),
+        replace: z.string().optional().describe('The replacement code content (used for "replace").'),
+        content: z.string().optional().describe('The content to write, append, replace, or insert.'),
+        replaceText: z.string().optional().describe('Alternative parameter name for replace'),
+        filePath: z.string().optional().describe('Optional file path target for this operation.'),
+        path: z.string().optional().describe('Alternative parameter name for filePath'),
+        file: z.string().optional().describe('Alternative parameter name for filePath'),
         startAnchor: z.string().optional().describe('An optional start delimiter/string anchor. If provided, the modification is isolated to only occur AFTER this string.'),
         endAnchor: z.string().optional().describe('An optional end delimiter/string anchor. If provided, the modification is isolated to only occur BEFORE this string.'),
         startLine: z.number().optional().describe('1-indexed starting line number to restrict the scope of the search/replace.'),
@@ -945,14 +956,80 @@ export const developmentTools = {
           return sub.split('\n').length;
         };
 
-        // 1. Process single file operation if filePath and operations are specified
-        if (filePath && operations && operations.length > 0) {
-          const resolvedPath = resolveSafePath(filePath);
-          let fileContent = await loadFile(filePath);
+        // Resolve target file path from root arguments, files array, operations array, or active workspace file
+        let targetFilePath = filePath || args.path || args.file || args.filename || args.targetFile || args.targetFilePath;
+
+        if (!targetFilePath && Array.isArray(files) && files.length === 1 && typeof files[0] === 'string') {
+          targetFilePath = files[0];
+        }
+
+        if (!targetFilePath && Array.isArray(operations)) {
+          for (const op of operations) {
+            if (op && (op.filePath || op.path || op.file || op.filename || op.targetFile)) {
+              targetFilePath = op.filePath || op.path || op.file || op.filename || op.targetFile;
+              break;
+            }
+          }
+        }
+
+        // If targetFilePath is still missing and operations are provided, infer from context
+        if (!targetFilePath && Array.isArray(operations) && operations.length > 0) {
+          const lastFile = getLastWorkspaceFile();
+          if (lastFile) {
+            targetFilePath = lastFile;
+          } else {
+            const workspaceFiles = await getWorkspaceFiles();
+            // Check if any operation has a search pattern matching a workspace file
+            const opWithSearch = operations.find(op => (op.search || op.find || op.findText || op.pattern) && typeof (op.search || op.find || op.findText || op.pattern) === 'string');
+            if (opWithSearch) {
+              const term = opWithSearch.search || opWithSearch.find || opWithSearch.findText || opWithSearch.pattern;
+              const matches = [];
+              for (const wf of workspaceFiles) {
+                const content = await loadFile(wf);
+                if (content.includes(term)) {
+                  matches.push(wf);
+                }
+              }
+              if (matches.length === 1) {
+                targetFilePath = matches[0];
+              }
+            }
+
+            // Check if content has comment mentioning a file path
+            if (!targetFilePath) {
+              const opWithContent = operations.find(op => (op.content || op.replace || op.replaceText) && typeof (op.content || op.replace || op.replaceText) === 'string');
+              if (opWithContent) {
+                const textContent = opWithContent.content || opWithContent.replace || opWithContent.replaceText;
+                const commentFileMatch = textContent.match(/(?:\/\/\s*|\/\*\s*)([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)/);
+                if (commentFileMatch && workspaceFiles.includes(commentFileMatch[1])) {
+                  targetFilePath = commentFileMatch[1];
+                } else {
+                  // Candidate match for typical server entry point if express / sqlite / server code is found
+                  if (/(?:express|sqlite|mongoose|fastify|createServer|app\.listen)/.test(textContent)) {
+                    const serverCandidates = workspaceFiles.filter(wf => 
+                      /(?:^|\/)(?:index|server|app|main)\.(?:js|ts|mjs|cjs)$/i.test(wf)
+                    );
+                    if (serverCandidates.length === 1) {
+                      targetFilePath = serverCandidates[0];
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // 1. Process single file operation if targetFilePath and operations are specified
+        if (targetFilePath && operations && operations.length > 0) {
+          const resolvedPath = resolveSafePath(targetFilePath);
+          let fileContent = await loadFile(targetFilePath);
 
           for (let i = 0; i < operations.length; i++) {
             const op = operations[i];
             const unescape = op.unescape !== false;
+
+            const searchVal = op.search !== undefined ? op.search : (op.find !== undefined ? op.find : (op.findText !== undefined ? op.findText : (op.pattern !== undefined ? op.pattern : undefined)));
+            const replaceOrContentVal = op.replace !== undefined ? op.replace : (op.content !== undefined ? op.content : (op.replaceText !== undefined ? op.replaceText : ''));
 
             let targetStartIdx = 0;
             let targetEndIdx = fileContent.length;
@@ -996,56 +1073,53 @@ export const developmentTools = {
             const suffix = fileContent.slice(targetEndIdx);
 
             if (op.action === 'write') {
-              const contentVal = op.content !== undefined ? op.content : '';
-              targetSection = unescape ? unescapeString(contentVal) : contentVal;
+              targetSection = unescape ? unescapeString(replaceOrContentVal) : replaceOrContentVal;
             } 
             else if (op.action === 'append') {
-              const contentVal = op.content !== undefined ? op.content : '';
-              targetSection = targetSection + (unescape ? unescapeString(contentVal) : contentVal);
+              targetSection = targetSection + (unescape ? unescapeString(replaceOrContentVal) : replaceOrContentVal);
             } 
             else if (op.action === 'replace') {
-              const replaceVal = op.replace !== undefined ? op.replace : '';
-              const finalReplace = unescape ? unescapeString(replaceVal) : replaceVal;
+              const finalReplace = unescape ? unescapeString(replaceOrContentVal) : replaceOrContentVal;
 
-              if (op.search === undefined) {
+              if (searchVal === undefined) {
                 targetSection = finalReplace;
               } else if (op.isRegex) {
-                const searchPat = unescape ? unescapeString(op.search) : op.search;
+                const searchPat = unescape ? unescapeString(searchVal) : searchVal;
                 const flags = op.regexFlags !== undefined ? op.regexFlags : 'g';
                 const re = new RegExp(searchPat, flags);
                 targetSection = targetSection.replace(re, finalReplace);
               } else {
-                const finalSearch = unescape ? unescapeString(op.search) : op.search;
+                const finalSearch = unescape ? unescapeString(searchVal) : searchVal;
                 if (targetSection.indexOf(finalSearch) === -1) {
-                  return { success: false, error: `Operation [${i}]: Search pattern "${op.search}" not found inside target section.` };
+                  return { success: false, error: `Operation [${i}]: Search pattern "${searchVal}" not found inside target section.` };
                 }
                 targetSection = targetSection.split(finalSearch).join(finalReplace);
               }
             } 
             else if (op.action === 'insert_before') {
-              const finalContent = op.content !== undefined ? (unescape ? unescapeString(op.content) : op.content) : '';
+              const finalContent = unescape ? unescapeString(replaceOrContentVal) : replaceOrContentVal;
 
-              if (op.search === undefined) {
+              if (searchVal === undefined) {
                 targetSection = finalContent + targetSection;
               } else {
-                const finalSearch = unescape ? unescapeString(op.search) : op.search;
+                const finalSearch = unescape ? unescapeString(searchVal) : searchVal;
                 const idx = targetSection.indexOf(finalSearch);
                 if (idx === -1) {
-                  return { success: false, error: `Operation [${i}]: Search pattern "${op.search}" not found inside target section.` };
+                  return { success: false, error: `Operation [${i}]: Search pattern "${searchVal}" not found inside target section.` };
                 }
                 targetSection = targetSection.slice(0, idx) + finalContent + targetSection.slice(idx);
               }
             } 
             else if (op.action === 'insert_after') {
-              const finalContent = op.content !== undefined ? (unescape ? unescapeString(op.content) : op.content) : '';
+              const finalContent = unescape ? unescapeString(replaceOrContentVal) : replaceOrContentVal;
 
-              if (op.search === undefined) {
+              if (searchVal === undefined) {
                 targetSection = targetSection + finalContent;
               } else {
-                const finalSearch = unescape ? unescapeString(op.search) : op.search;
+                const finalSearch = unescape ? unescapeString(searchVal) : searchVal;
                 const idx = targetSection.indexOf(finalSearch);
                 if (idx === -1) {
-                  return { success: false, error: `Operation [${i}]: Search pattern "${op.search}" not found inside target section.` };
+                  return { success: false, error: `Operation [${i}]: Search pattern "${searchVal}" not found inside target section.` };
                 }
                 const insertIdx = idx + finalSearch.length;
                 targetSection = targetSection.slice(0, insertIdx) + finalContent + targetSection.slice(insertIdx);
@@ -1055,10 +1129,11 @@ export const developmentTools = {
             fileContent = prefix + targetSection + suffix;
           }
 
-          fileContents[filePath] = fileContent;
-          if (fileContent !== originalContents[filePath]) {
-            modifiedFiles.add(filePath);
+          fileContents[targetFilePath] = fileContent;
+          if (fileContent !== originalContents[targetFilePath]) {
+            modifiedFiles.add(targetFilePath);
           }
+          setLastWorkspaceFile(targetFilePath);
         }
 
         // 2. Process correlation if requested
@@ -1539,7 +1614,13 @@ export const developmentTools = {
           };
         }
 
-        if (!(filePath && operations) && !correlate && !propagateCorrelations && !searchFunctionality) {
+        if (!(targetFilePath && operations) && !correlate && !propagateCorrelations && !searchFunctionality) {
+          if (operations && operations.length > 0 && !targetFilePath) {
+            return {
+              success: false,
+              error: 'Missing required "filePath" parameter for codeFixer operations. You must specify "filePath": "path/to/file" alongside your "operations" array. Example: codeFixer({ filePath: "backend/index.js", operations: [{ action: "replace", search: "...", replace: "..." }] })'
+            };
+          }
           return { success: false, error: 'At least one of (filePath & operations), correlate, propagateCorrelations, or searchFunctionality must be specified.' };
         }
 
@@ -1553,6 +1634,7 @@ export const developmentTools = {
             const dir = path.dirname(resolved);
             await fs.mkdir(dir, { recursive: true });
             await fs.writeFile(resolved, modified, 'utf-8');
+            setLastWorkspaceFile(f);
 
             if (lintAndFormat) {
               const formatCmd = `npx prettier --write "${resolved}"`;
@@ -1570,11 +1652,12 @@ export const developmentTools = {
           modifiedDiffs[f] = diff;
         }
 
-        if (filePath && operations && !correlate && !propagateCorrelations && !searchFunctionality) {
-          const diff = modifiedDiffs[filePath] || '';
+        if (targetFilePath && operations && !correlate && !propagateCorrelations && !searchFunctionality) {
+          const diff = modifiedDiffs[targetFilePath] || '';
           return {
             success: true,
-            message: dryRun ? `Dry-run simulation complete for ${filePath}.` : (lintAndFormat ? `Successfully modified, linted, and formatted ${filePath}.` : `Successfully modified ${filePath}.`),
+            filePath: targetFilePath,
+            message: dryRun ? `Dry-run simulation complete for ${targetFilePath}.` : (lintAndFormat ? `Successfully modified, linted, and formatted ${targetFilePath}.` : `Successfully modified ${targetFilePath}.`),
             diff
           };
         }

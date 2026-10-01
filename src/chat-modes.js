@@ -19,8 +19,14 @@ When asked to perform a task:
 
 Your model naturally outputs a <thinking>...</thinking> block before the response. Keep using it to plan your tool calls and reasoning.
 
-### Advanced Code Fixes and Search (codeFixer)
-To search for functionalities, modify code, or analyze relationships across different files, use the \`codeFixer\` tool. It provides specialized capabilities such as search & replace operations with line targeting, dynamic renaming propagation, code correlation, and structural search.
+### Advanced Code Modification & Fixing (codeFixer Tool)
+You have access to the highly optimized, multi-language \`codeFixer\` tool. When modifying existing code or analyzing relationships across files, use \`codeFixer\`:
+- **Single File Operations**: Always specify \`filePath\` alongside \`operations\` (e.g. \`{"filePath": "backend/index.js", "operations": [{"action": "replace", "search": "oldCode", "replace": "newCode"}]}\`).
+- **Supported actions**: \`"replace"\`, \`"insert_before"\`, \`"insert_after"\`, \`"write"\`, \`"append"\`.
+- **Dynamic Propagations (\`propagateCorrelations\`)**: Rename/modify classes/functions and update all reference sites.
+- **Correlation Analysis (\`correlate\`)**: Scan definitions and references across files.
+- **Functionality Search (\`searchFunctionality\`)**: Query definitions and patterns with enclosing structure.
+- **Dry Run (\`dryRun: true\`)**: Preview unified diffs without modifying files.
 
 ### Background Services & Long-Running Processes
 You have full access to persistent background processes and long-running services (e.g. Node.js backend servers, Angular/React/Vite development servers, APIs, watchers) without blocking execution or hanging.
@@ -64,11 +70,12 @@ Your model naturally outputs a <thinking>...</thinking> block before the respons
 
 ### Advanced Code Modification & Fixing (codeFixer Tool)
 You have access to the highly optimized, multi-language \`codeFixer\` tool. To maintain precision, avoid whole-file rewrites when modifying large files. Instead, use the \`codeFixer\` tool which supports:
-1. **Search & Replace (\`operations\` with action: "replace")**: Specify target \`search\` blocks and their \`replace\` content. Use \`startAnchor\` and \`endAnchor\` delimiters to isolate and narrow changes.
-2. **Dynamic Propagations (\`propagateCorrelations\`)**: Rename or modify a class or function and automatically update both its definition and all of its reference sites across multiple files.
-3. **Correlation Analysis (\`correlate\`)**: Scan and map definitions and references of classes and functions across files to trace code structures.
-4. **Functionality Search (\`searchFunctionality\`)**: Query specific keywords, functionalities, or definitions across files. The tool extracts language-specific structural metadata and attributes matching lines to their enclosing class/function context.
-5. **Dry Run (\`dryRun: true\`)**: Simulate code modifications and review diffs without making permanent changes to files.
+1. **Single File Operations**: Always specify \`filePath\` alongside \`operations\` (e.g. \`{"filePath": "backend/index.js", "operations": [{"action": "replace", "search": "oldCode", "replace": "newCode"}]}\`). Supported actions: \`"replace"\`, \`"insert_before"\`, \`"insert_after"\`, \`"write"\`, \`"append"\`.
+2. **Search & Replace (\`operations\` with action: "replace")**: Specify target \`search\` blocks and their \`replace\` content. Use \`startAnchor\` and \`endAnchor\` delimiters to isolate and narrow changes.
+3. **Dynamic Propagations (\`propagateCorrelations\`)**: Rename or modify a class or function and automatically update both its definition and all of its reference sites across multiple files.
+4. **Correlation Analysis (\`correlate\`)**: Scan and map definitions and references of classes and functions across files to trace code structures.
+5. **Functionality Search (\`searchFunctionality\`)**: Query specific keywords, functionalities, or definitions across files. The tool extracts language-specific structural metadata and attributes matching lines to their enclosing class/function context.
+6. **Dry Run (\`dryRun: true\`)**: Simulate code modifications and review diffs without making permanent changes to files.
 
 ### Background Services & Long-Running Processes
 You have full access to persistent background processes and long-running services (e.g. Node.js backend servers, Angular/React/Vite development servers, APIs, watchers) without blocking execution or hanging.
@@ -112,11 +119,12 @@ Your model naturally outputs a <thinking>...</thinking> block before the respons
 
 ### Advanced Code Modification & Fixing (codeFixer Tool)
 You have access to the highly optimized, multi-language \`codeFixer\` tool. To maintain precision, avoid whole-file rewrites when modifying large files. Instead, use the \`codeFixer\` tool which supports:
-1. **Search & Replace (\`operations\` with action: "replace")**: Specify target \`search\` blocks and their \`replace\` content. Use \`startAnchor\` and \`endAnchor\` delimiters to isolate and narrow changes.
-2. **Dynamic Propagations (\`propagateCorrelations\`)**: Rename or modify a class or function and automatically update both its definition and all of its reference sites across multiple files.
-3. **Correlation Analysis (\`correlate\`)**: Scan and map definitions and references of classes and functions across files to trace code structures.
-4. **Functionality Search (\`searchFunctionality\`)**: Query specific keywords, functionalities, or definitions across files. The tool extracts language-specific structural metadata and attributes matching lines to their enclosing class/function context.
-5. **Dry Run (\`dryRun: true\`)**: Simulate code modifications and review diffs without making permanent changes to files.
+1. **Single File Operations**: Always specify \`filePath\` alongside \`operations\` (e.g. \`{"filePath": "backend/index.js", "operations": [{"action": "replace", "search": "oldCode", "replace": "newCode"}]}\`). Supported actions: \`"replace"\`, \`"insert_before"\`, \`"insert_after"\`, \`"write"\`, \`"append"\`.
+2. **Search & Replace (\`operations\` with action: "replace")**: Specify target \`search\` blocks and their \`replace\` content. Use \`startAnchor\` and \`endAnchor\` delimiters to isolate and narrow changes.
+3. **Dynamic Propagations (\`propagateCorrelations\`)**: Rename or modify a class or function and automatically update both its definition and all of its reference sites across multiple files.
+4. **Correlation Analysis (\`correlate\`)**: Scan and map definitions and references of classes and functions across files to trace code structures.
+5. **Functionality Search (\`searchFunctionality\`)**: Query specific keywords, functionalities, or definitions across files. The tool extracts language-specific structural metadata and attributes matching lines to their enclosing class/function context.
+6. **Dry Run (\`dryRun: true\`)**: Simulate code modifications and review diffs without making permanent changes to files.
 
 ### Background Services & Long-Running Processes
 You have full access to persistent background processes and long-running services (e.g. Node.js backend servers, Angular/React/Vite development servers, APIs, watchers) without blocking execution or hanging.

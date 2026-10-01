@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs/promises';
 import path from 'path';
 import { tools } from '../src/tools.js';
+import { setLastWorkspaceFile, resetLastWorkspaceFile } from '../src/tools/core-helper.js';
 
 test('codeFixer Tool Suite', async (t) => {
   const testFile = 'scratch/test-code-fixer-temp.js';
@@ -546,6 +547,105 @@ bar`;
     assert.equal(res.success, true);
     content = await fs.readFile(resolvedPath, 'utf-8');
     assert.equal(content, 'hello\nworld\nfoo\ninserted_after\nbar');
+
+    await cleanupFile();
+  });
+
+  await t.test('supports filePath aliases and operation content fallback', async () => {
+    await setupFile('const a = 1;');
+
+    // 1. Using "path" alias instead of "filePath", and "content" instead of "replace"
+    const res = await tools.codeFixer.execute({
+      path: testFile,
+      operations: [
+        {
+          action: 'replace',
+          content: 'const a = 100;'
+        }
+      ],
+      lintAndFormat: false
+    });
+
+    assert.equal(res.success, true);
+    const content = await fs.readFile(resolvedPath, 'utf-8');
+    assert.equal(content, 'const a = 100;');
+
+    await cleanupFile();
+  });
+
+  await t.test('infers targetFilePath from operation or recent workspace file', async () => {
+    await setupFile('const port = 3000;');
+
+    // 1. File path provided inside operation object
+    let res = await tools.codeFixer.execute({
+      operations: [
+        {
+          filePath: testFile,
+          action: 'replace',
+          search: '3000',
+          replace: '8080'
+        }
+      ],
+      lintAndFormat: false
+    });
+
+    assert.equal(res.success, true);
+    let content = await fs.readFile(resolvedPath, 'utf-8');
+    assert.equal(content, 'const port = 8080;');
+
+    // 2. targetFilePath inferred from getLastWorkspaceFile
+    setLastWorkspaceFile(testFile);
+    res = await tools.codeFixer.execute({
+      operations: [
+        {
+          action: 'replace',
+          content: 'const port = 5000;'
+        }
+      ],
+      lintAndFormat: false
+    });
+
+    assert.equal(res.success, true);
+    content = await fs.readFile(resolvedPath, 'utf-8');
+    assert.equal(content, 'const port = 5000;');
+
+    // 3. Meaningful error when filePath cannot be resolved
+    resetLastWorkspaceFile();
+    res = await tools.codeFixer.execute({
+      operations: [
+        {
+          action: 'replace',
+          content: 'console.log("unresolved");'
+        }
+      ],
+      lintAndFormat: false
+    });
+
+    assert.equal(res.success, false);
+    assert.ok(res.error.includes('Missing required "filePath" parameter'));
+    assert.ok(res.error.includes('codeFixer({ filePath:'));
+
+    await cleanupFile();
+  });
+
+  await t.test('supports find/findText/pattern and replaceText in operations', async () => {
+    await setupFile('const title = "Plumar";');
+
+    const res = await tools.codeFixer.execute({
+      filePath: testFile,
+      operations: [
+        {
+          action: 'replace',
+          find: 'Plumar',
+          replaceText: 'Plumar CLI'
+        }
+      ],
+      lintAndFormat: false
+    });
+
+    assert.equal(res.success, true);
+    const content = await fs.readFile(resolvedPath, 'utf-8');
+    assert.equal(content, 'const title = "Plumar CLI";');
 
     await cleanupFile();
   });
