@@ -408,120 +408,16 @@ export const filesystemTools = {
 
   executeCommand: new FunctionTool({
     name: 'executeCommand',
-    description: 'Execute a terminal shell command within the workspace directory. Supports both synchronous commands (e.g. tests, linters, git, builds) and persistent background services (e.g. "node index.js", "ng serve", "npm start", "vite", API backends, or daemons).\n\nBACKGROUND PROCESS EXECUTION:\nTo launch persistent servers, long-running processes, or background daemons without hanging or blocking your turn, ALWAYS set background: true. The process will be detached, monitored by the process registry, and return immediately with its processId, PID, and initial startup logs. You can inspect logs or stop running processes anytime using processManager or portManager.',
+    description: 'Execute a terminal shell command within the workspace directory in the background. All commands (servers, dev watchers, scripts, builds, tests) are automatically launched in the background without blocking or hanging the assistant turn. The process is registered in the background process manager and monitored, returning immediately with processId, PID, initial startup logs, and log file location. Active background processes that are still alive are continuously monitored in the top lines of the console.',
     parameters: z.object({
-      command: z.string().describe('The shell command to execute (e.g. "npm test", "node server.js", "ng serve --open"). For long-running servers, always pair with background: true.'),
-      background: z.boolean().optional().default(false).describe('Set to true to run long-running servers, watchers, or daemons in the background without blocking execution. When true, returns immediately with processId, PID, and initial startup logs.'),
-      name: z.string().optional().describe('Optional descriptive label for the background service (e.g. "backend", "frontend", "api-server"). Used to track and manage the process.')
+      command: z.string().describe('The shell command to execute in the background (e.g. "npm test", "node server.js", "ng serve --open").'),
+      background: z.boolean().optional().default(true).describe('Always true. Commands are always executed in the background as managed persistent services.'),
+      name: z.string().optional().describe('Optional descriptive label for the background service (e.g. "backend", "frontend", "api-server"). Used to track and manage the process.'),
+      cwd: z.string().optional().describe('Optional working directory relative to workspace.')
     }),
-    execute: async ({ command, background = false, name }) => {
-      if (background) {
-        return await startBackgroundProcess({ command, name });
-      }
-
-      const resolveCarriageReturnsLocal = (text) => {
-        if (typeof text !== 'string') return text;
-        const lines = text.split(/\r?\n/);
-        const resolvedLines = lines.map(line => {
-          if (line.includes('\r')) {
-            const parts = line.split('\r');
-            for (let i = parts.length - 1; i >= 0; i--) {
-              if (parts[i].trim()) {
-                return parts[i];
-              }
-            }
-            return parts[parts.length - 1];
-          }
-          return line;
-        });
-        return resolvedLines.join('\n');
-      };
-
-      return new Promise((resolve) => {
-        const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/bash';
-        const args = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-c', command];
-        
-        const child = spawn(shell, args, { cwd: WORKSPACE_DIR });
-        
-        let stdout = '';
-        let stderr = '';
-        
-        const isTTY = process.stdout.isTTY;
-        let nonTtyStdoutBuffer = '';
-        let nonTtyStderrBuffer = '';
-        
-        child.stdout.on('data', (data) => {
-          const chunk = data.toString();
-          stdout += chunk;
-          
-          if (isTTY) {
-            process.stdout.write(chunk);
-          } else {
-            nonTtyStdoutBuffer += chunk;
-            const lines = nonTtyStdoutBuffer.split('\n');
-            nonTtyStdoutBuffer = lines.pop(); // Keep partial line
-            for (const line of lines) {
-              const cleanLine = resolveCarriageReturnsLocal(line);
-              process.stdout.write(cleanLine + '\n');
-            }
-          }
-        });
-        
-        child.stderr.on('data', (data) => {
-          const chunk = data.toString();
-          stderr += chunk;
-          
-          if (isTTY) {
-            process.stderr.write(chunk);
-          } else {
-            nonTtyStderrBuffer += chunk;
-            const lines = nonTtyStderrBuffer.split('\n');
-            nonTtyStderrBuffer = lines.pop(); // Keep partial line
-            for (const line of lines) {
-              const cleanLine = resolveCarriageReturnsLocal(line);
-              process.stderr.write(cleanLine + '\n');
-            }
-          }
-        });
-        
-        child.on('error', (err) => {
-          if (!isTTY) {
-            if (nonTtyStdoutBuffer) {
-              process.stdout.write(resolveCarriageReturnsLocal(nonTtyStdoutBuffer));
-            }
-            if (nonTtyStderrBuffer) {
-              process.stderr.write(resolveCarriageReturnsLocal(nonTtyStderrBuffer));
-            }
-          }
-          resolve({
-            success: false,
-            exitCode: -1,
-            stdout,
-            stderr: stderr + '\n' + err.message,
-            message: `Failed to start process: ${err.message}\n\nOutput:\n${stdout}\n\nError:\n${stderr}`
-          });
-        });
-        
-        child.on('close', (code) => {
-          if (!isTTY) {
-            if (nonTtyStdoutBuffer) {
-              process.stdout.write(resolveCarriageReturnsLocal(nonTtyStdoutBuffer) + '\n');
-            }
-            if (nonTtyStderrBuffer) {
-              process.stderr.write(resolveCarriageReturnsLocal(nonTtyStderrBuffer) + '\n');
-            }
-          }
-          resolve({
-            success: code === 0,
-            exitCode: code ?? 0,
-            stdout,
-            stderr,
-            message: code === 0 
-              ? `Command executed successfully.\n\nOutput:\n${stdout}` 
-              : `Command failed with exit code ${code}.\n\nOutput:\n${stdout}\n\nError:\n${stderr}`
-          });
-        });
-      });
+    execute: async ({ command, background = true, name, cwd }) => {
+      // executeCommand is always executed in the background
+      return await startBackgroundProcess({ command, name, cwd });
     }
   }),
 

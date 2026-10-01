@@ -91,8 +91,16 @@ import {
   printPlugins,
   printSamples,
   formatChatResponse,
-  initializeFormatter
+  initializeFormatter,
+  printBackgroundProcessesMonitor
 } from './src/formatter.js';
+import { 
+  getAliveBackgroundProcesses, 
+  listBackgroundProcesses, 
+  stopBackgroundProcess, 
+  getBackgroundProcessLogs, 
+  isProcessAlive 
+} from './src/tools/process-registry.js';
 
 /**
  * Loads session events and populates them into the readline history in reverse chronological order
@@ -1092,6 +1100,20 @@ async function main() {
         // ignore
       }
 
+      // Display top lines monitor of background processes still alive
+      printBackgroundProcessesMonitor();
+
+      if (process.stdout.isTTY) {
+        try {
+          const alive = getAliveBackgroundProcesses();
+          if (alive.length > 0) {
+            process.stdout.write(`\x1b]0;plumar-cli [${alive.length} bg alive: ${alive.map(p => p.name).join(', ')}]\x07`);
+          } else {
+            process.stdout.write(`\x1b]0;plumar-cli\x07`);
+          }
+        } catch {}
+      }
+
       // Ask user for input
       const userInput = await rl.question(pc.green(pc.bold('You › ')));
       const trimmedInput = userInput.trim();
@@ -1582,6 +1604,63 @@ export const tool = new FunctionTool({
               console.log(pc.yellow(`${pc.bold('Execute Thinking disabled')}: The thinking process will remain thought-only and will not automatically execute.\n`));
             }
             displaySettingsTable();
+          }
+          continue;
+        }
+
+        else if (command === '/processes' || command === '/ps' || command === '/bg') {
+          const parts = arg ? arg.split(/\s+/) : [];
+          const sub = parts[0]?.toLowerCase();
+          const target = parts[1];
+
+          if (sub === 'stop' || sub === 'kill') {
+            if (!target) {
+              console.log(pc.yellow('Usage: /processes stop <processId|name|pid>\n'));
+            } else {
+              const res = await stopBackgroundProcess({
+                processId: target,
+                name: target,
+                pid: Number(target) || undefined
+              });
+              if (res.success) {
+                console.log(pc.green(`✔ ${res.message}\n`));
+              } else {
+                console.log(pc.red(`✖ ${res.error}\n`));
+              }
+            }
+          } else if (sub === 'logs' || sub === 'log') {
+            if (!target) {
+              console.log(pc.yellow('Usage: /processes logs <processId|name|pid> [lines]\n'));
+            } else {
+              const linesCount = Number(parts[2]) || 30;
+              const res = await getBackgroundProcessLogs({
+                processId: target,
+                name: target,
+                pid: Number(target) || undefined,
+                lines: linesCount
+              });
+              if (res.success) {
+                console.log(pc.cyan(`\nLogs for ${res.name} (${res.processId}, PID: ${res.pid}) [status: ${res.status}]:`));
+                console.log(res.logs + '\n');
+              } else {
+                console.log(pc.red(`✖ ${res.error}\n`));
+              }
+            }
+          } else {
+            const allProcs = listBackgroundProcesses();
+            if (allProcs.length === 0) {
+              console.log(pc.dim('No background processes have been started in this session.\n'));
+            } else {
+              console.log(pc.bold(pc.yellow('\nManaged Background Processes:')));
+              for (const p of allProcs) {
+                const isAlive = isProcessAlive(p.pid);
+                const badge = isAlive ? pc.green('● RUNNING') : pc.dim(`○ ${p.status.toUpperCase()}`);
+                console.log(`  ${badge} ${pc.bold(p.name)} (ID: ${pc.cyan(p.id)}, PID: ${pc.yellow(p.pid)}, uptime: ${pc.magenta(p.uptime)})`);
+                if (p.command) console.log(`      ${pc.dim('Command:')} ${pc.dim(p.command)}`);
+                if (p.logFile) console.log(`      ${pc.dim('Logs:')}    ${pc.dim(p.logFile)}`);
+              }
+              console.log(pc.dim('\nCommands: /processes stop <id|name|pid> | /processes logs <id|name|pid> [lines]\n'));
+            }
           }
           continue;
         } 

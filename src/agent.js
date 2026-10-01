@@ -201,7 +201,7 @@ CRITICAL DIRECTIVES:
 - NEVER state: "As an AI, I cannot run commands in your local terminal..."
 - NEVER state: "The execution step is now for you to perform the final setup..."
 - NEVER tell the user to open a terminal and run setup or server commands themselves.
-- Whenever an application needs to be run, tested, or set up, you MUST directly invoke \`executeCommand\` (with \`background: true\` for servers or daemons, or without for short commands) or \`processManager\`!
+- Whenever an application needs to be run, tested, or set up, you MUST directly invoke \`executeCommand\` (which always executes in the background and is monitored live in the top lines) or \`processManager\`!
 `;
 
   let systemPrompt = terminalCapabilityHeader + '\n\n' + modeMeta.systemPrompt;
@@ -246,7 +246,7 @@ Format of the tool call inside your response:
   systemPrompt += `
 
 ### Background Process & Server Execution Guidance
-You have a persistent process management system and background execution environment. You can directly run and monitor long-running background servers (Node.js servers, Angular \`ng serve\`, React/Vite development servers, APIs, Python servers, daemons, watchers) in the background without blocking execution.
+You have a persistent process management system and background execution environment. All commands executed via \`executeCommand\` ALWAYS run in the background as managed services without blocking execution, and any processes that are still alive are monitored continuously in real time in the top lines of the console. You can directly run and monitor long-running background servers (Node.js servers, Angular \`ng serve\`, React/Vite development servers, APIs, Python servers, daemons, watchers) in the background without blocking execution.
 
 CRITICAL INSTRUCTIONS:
 1. **NEVER REFUSE**: Do NOT claim you cannot run persistent processes, lack a terminal, or lack background process management.

@@ -119,6 +119,15 @@ export async function startBackgroundProcess({ command, name, cwd, startupWaitMs
 
   const isAlive = isProcessAlive(child.pid) && procEntry.status === 'running';
 
+  const stdoutLogs = recentLogs
+    .filter(l => l.includes('[stdout]'))
+    .map(l => l.replace(/^\[.*?\] \[stdout\]\s?/, ''))
+    .join('\n');
+  const stderrLogs = recentLogs
+    .filter(l => l.includes('[stderr]'))
+    .map(l => l.replace(/^\[.*?\] \[stderr\]\s?/, ''))
+    .join('\n');
+
   if (!isAlive && procEntry.exitCode !== null && procEntry.exitCode !== 0) {
     return {
       success: false,
@@ -128,7 +137,9 @@ export async function startBackgroundProcess({ command, name, cwd, startupWaitMs
       status: 'failed',
       exitCode: procEntry.exitCode,
       error: `Process terminated immediately after start with exit code ${procEntry.exitCode}.`,
-      logs: recentLogs.slice(-25).join('\n')
+      logs: recentLogs.slice(-25).join('\n'),
+      stdout: stdoutLogs,
+      stderr: stderrLogs
     };
   }
 
@@ -139,10 +150,41 @@ export async function startBackgroundProcess({ command, name, cwd, startupWaitMs
     name: label,
     command,
     status: isAlive ? 'running' : (procEntry.status || 'stopped'),
+    exitCode: procEntry.exitCode !== null ? procEntry.exitCode : (isAlive ? undefined : 0),
     logFile: path.relative(WORKSPACE_DIR, logFilePath),
-    message: `Background service "${label}" (PID: ${child.pid}) started successfully in background.`,
-    initialLogs: recentLogs.slice(-20).join('\n')
+    message: isAlive
+      ? `Background service "${label}" (PID: ${child.pid}) started successfully in background.`
+      : `Command "${label}" finished with exit code ${procEntry.exitCode ?? 0}.`,
+    initialLogs: recentLogs.slice(-20).join('\n'),
+    stdout: stdoutLogs,
+    stderr: stderrLogs
   };
+}
+
+/**
+ * Retrieve all currently alive background processes.
+ */
+export function getAliveBackgroundProcesses() {
+  const result = [];
+  for (const proc of managedProcesses.values()) {
+    const alive = isProcessAlive(proc.pid);
+    if (!alive && proc.status === 'running') {
+      proc.status = proc.exitCode === 0 ? 'stopped' : 'failed';
+    }
+    if (alive && proc.status === 'running') {
+      result.push({
+        id: proc.id,
+        name: proc.name,
+        pid: proc.pid,
+        command: proc.command,
+        status: 'running',
+        startTime: proc.startTime,
+        uptime: formatUptime(Date.now() - proc.startTime),
+        logFile: path.relative(WORKSPACE_DIR, proc.logFilePath)
+      });
+    }
+  }
+  return result;
 }
 
 /**

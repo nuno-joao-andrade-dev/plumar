@@ -251,6 +251,7 @@ if (typeof process !== 'undefined' && process.stdin && typeof process.stdin.emit
 import pc from 'picocolors';
 import { marked } from 'marked';
 import TerminalRenderer from 'marked-terminal';
+import { getAliveBackgroundProcesses, listBackgroundProcesses } from './tools/process-registry.js';
 
 let initLip = null;
 let Lipgloss = null;
@@ -415,6 +416,7 @@ export function printHelp(topic) {
   console.log(`  ${pc.yellow('/verbose')}      - Toggle verbose JSON payload logging (disabled by default).`);
   console.log(`  ${pc.yellow('/adk-info')}     - Toggle ADK internal event logging (disabled by default).`);
   console.log(`  ${pc.yellow('/execute-thinking')} - Toggle or run thinking process execution immediately (/execute-thinking run).`);
+  console.log(`  ${pc.yellow('/processes')}    - List and monitor active background processes and server daemons.`);
   console.log(`  ${pc.yellow('/policy')}       - View or configure allow/ask/deny execution rules for tools.`);
   console.log(`  ${pc.yellow('/settings')}     - View or dynamically switch settings (e.g. LLM Provider, Host, Auth).`);
   console.log(`  ${pc.yellow('/clear')}        - Clear terminal console and wipe conversation history.`);
@@ -777,25 +779,89 @@ export function resolveCarriageReturns(text) {
   return resolvedLines.join('\n');
 }
 
+export function formatBackgroundProcessesMonitor() {
+  let aliveProcs = [];
+  try {
+    aliveProcs = getAliveBackgroundProcesses();
+  } catch {
+    return null;
+  }
+  if (!aliveProcs || aliveProcs.length === 0) {
+    return null;
+  }
+
+  const countStr = `${aliveProcs.length} alive`;
+  const header = `Active Background Processes (${countStr})`;
+  
+  let maxContentWidth = header.length + 8;
+  const items = aliveProcs.map(proc => {
+    const cmdStr = proc.command ? ` - ${proc.command.length > 40 ? proc.command.slice(0, 37) + '...' : proc.command}` : '';
+    const rawLine = `● ${proc.name} (PID: ${proc.pid}, up: ${proc.uptime})${cmdStr}`;
+    if (rawLine.length > maxContentWidth) {
+      maxContentWidth = rawLine.length;
+    }
+    return { proc, cmdStr, rawLine };
+  });
+
+  const boxWidth = Math.min(Math.max(maxContentWidth + 4, 60), 96);
+  const titleBar = `─ ⚙️  ${pc.bold(header)} `.padEnd(boxWidth - 1, '─');
+  const topBorder = pc.bold(pc.cyan(`┌${titleBar}┐`));
+  const bottomBorder = pc.bold(pc.cyan(`└${'─'.repeat(boxWidth)}┘`));
+
+  const lines = [topBorder];
+  for (const { proc, cmdStr, rawLine } of items) {
+    const bullet = pc.green('●');
+    const name = pc.bold(proc.name);
+    const pid = pc.yellow(String(proc.pid));
+    const uptime = pc.magenta(proc.uptime);
+    const cmd = cmdStr ? pc.dim(cmdStr) : '';
+    
+    const padding = ' '.repeat(Math.max(0, boxWidth - 2 - rawLine.length));
+    lines.push(pc.bold(pc.cyan('│ ')) + `${bullet} ${name} (PID: ${pid}, up: ${uptime})${cmd}${padding} ` + pc.bold(pc.cyan('│')));
+  }
+  lines.push(bottomBorder);
+  return lines.join('\n');
+}
+
+export function printBackgroundProcessesMonitor() {
+  const formatted = formatBackgroundProcessesMonitor();
+  if (formatted) {
+    console.log(formatted);
+  }
+}
+
 export function printToolResult(toolName, result) {
   let statusStr = result.success !== false ? pc.green('Success') : pc.red('Failed');
   console.log(pc.blue(`[Agent Tool Result] `) + pc.bold(pc.blue(toolName)) + ` completed with ` + statusStr);
   
   if (toolName === 'executeCommand' && typeof result === 'object' && result !== null) {
+    if (result.pid) {
+      const isAlive = result.status === 'running';
+      const statusBadge = isAlive ? pc.green(pc.bold('● RUNNING IN BACKGROUND')) : pc.dim(`○ ${result.status || 'STOPPED'}`);
+      console.log(`\n  ⚙️  ${pc.bold('Process:')} ${pc.cyan(result.name || result.processId)} (PID: ${pc.yellow(result.pid)}, ID: ${pc.cyan(result.processId)})`);
+      console.log(`  📊 ${pc.bold('Status:')}  ${statusBadge}`);
+      if (result.command) {
+        console.log(`  💻 ${pc.bold('Command:')} ${pc.dim(result.command)}`);
+      }
+      if (result.logFile) {
+        console.log(`  📄 ${pc.bold('Log File:')} ${pc.dim(result.logFile)}`);
+      }
+    }
     if (result.success === false) {
       console.log(pc.red(`\nExit Code: ${result.exitCode ?? 'Failed'}`));
     }
-    if (result.stdout && result.stdout.trim()) {
-      console.log(pc.green('\nStandard Output:'));
-      console.log(result.stdout);
+    const outputText = result.stdout || result.initialLogs;
+    if (outputText && outputText.trim()) {
+      console.log(pc.green('\nStandard Output / Startup Logs:'));
+      console.log(outputText);
     }
     if (result.stderr && result.stderr.trim()) {
       console.log(pc.red('\nStandard Error:'));
       console.log(result.stderr);
     }
-    const statusMsg = result.success !== false
-      ? 'Command executed successfully.'
-      : (result.exitCode === -1 ? `Failed to start process.` : `Command failed with exit code ${result.exitCode}`);
+    const statusMsg = result.message || (result.success !== false
+      ? 'Command executed successfully in background.'
+      : (result.exitCode === -1 ? `Failed to start process.` : `Command failed with exit code ${result.exitCode}`));
     console.log(pc.dim(`\nStatus: ${statusMsg}\n`));
     return;
   }
@@ -820,9 +886,23 @@ export function printStatus(model, mode, modeMeta, temperature = null) {
   const tempStr = temperature !== null ? ` (temp: ${temperature})` : '';
   const modelDisplay = (model + tempStr).padEnd(38);
   const modeDisplay = (modeMeta.emoji ? (modeMeta.emoji + ' ' + modeMeta.name) : modeMeta.name).padEnd(38);
+  
+  let aliveProcs = [];
+  try {
+    aliveProcs = getAliveBackgroundProcesses();
+  } catch {}
+
   console.log(pc.bold(pc.cyan('┌────────────────────────────────────────────────────────┐')));
   console.log(pc.bold(pc.cyan('│')) + `  ${pc.bold('Active Model:')}  ${pc.magenta(modelDisplay)} ${pc.bold(pc.cyan('│'))}`);
   console.log(pc.bold(pc.cyan('│')) + `  ${pc.bold('Active Mode:')}   ${modeDisplay} ${pc.bold(pc.cyan('│'))}`);
+
+  if (aliveProcs.length > 0) {
+    const summary = aliveProcs.map(p => `${p.name}:${p.pid}`).join(', ');
+    const countText = `${aliveProcs.length} alive (${summary})`;
+    const bgDisplay = (countText.length > 37 ? countText.slice(0, 34) + '...' : countText).padEnd(37);
+    console.log(pc.bold(pc.cyan('│')) + `  ${pc.bold('Background:')}    ${pc.green('●')} ${pc.cyan(bgDisplay)} ${pc.bold(pc.cyan('│'))}`);
+  }
+
   console.log(pc.bold(pc.cyan('└────────────────────────────────────────────────────────┘')));
   console.log();
 }
