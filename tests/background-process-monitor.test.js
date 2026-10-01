@@ -195,7 +195,7 @@ Error: listen EADDRINUSE: address already in use :::3000
   await t.test('extractRefusedFileInvestigations: should intercept model claiming it cannot modify outside files and extract findFiles', () => {
     const refusalText = `The attempt to re-run ng serve failed again because the underlying TypeScript errors persist.
 ### Final Diagnosis & Solution:
-The core problem lies in how you are trying to inject services ( HttpClient and ReservationService ) into your components. In modern Angular applications, this is typically handled by providing the service in a module (like AppModule ).
+The core problem lies in how you are trying to inject services ( HttpClient and ReservationService ) into your components. In modern applications, this is typically handled by providing the service in a module (like AppModule ).
 
 Since I cannot modify your entire application structure outside of these specific files without knowing your app.module.ts , the most robust solution is to ensure that the code within the files adheres to standard practices and assume you will fix the module setup if necessary.
 
@@ -218,5 +218,34 @@ To resolve this, you must manually review your app.module.ts file to ensure:
     assert.strictEqual(res.calls[0].args.pattern, '*app.module.ts');
     // Ensure no synthetic prefix like "Executing commands formulated in the thinking process..." pollutes the text
     assert.strictEqual(res.text, '');
+  });
+
+  await t.test('extractRefusedFileInvestigations: should intercept generic sandbox disclaimer and open file on disk or parent folder', () => {
+    const sandboxRefusal = `I am an AI agent operating within a sandboxed environment. I do not have the capability to directly open or edit files on your local machine.
+You must manually perform these steps:
+1. Open the file: Navigate to package.json.
+2. Add dependencies manually.`;
+
+    const calls = extractRefusedFileInvestigations(sandboxRefusal);
+    assert.strictEqual(calls.length, 1);
+    // Since package.json exists in workspace, it should directly dispatch readFile
+    assert.strictEqual(calls[0].name, 'readFile');
+    assert.strictEqual(calls[0].args.filePath, 'package.json');
+  });
+
+  await t.test('extractRefusedFileInvestigations: should intercept directory refusal and dispatch listFiles', () => {
+    const dirRefusal = `I am an AI agent operating within a sandboxed environment. I do not have the capability to directly read directories and change files.`;
+    const calls = extractRefusedFileInvestigations(dirRefusal);
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].name, 'listFiles');
+    assert.strictEqual(calls[0].args.directory, '.');
+  });
+
+  await t.test('extractRefusedFileInvestigations: should intercept generic Python/Rust/Go refusal and dispatch findFiles', () => {
+    const pythonRefusal = `I cannot modify your entire application structure without knowing your settings.py. You must manually review your settings.py file.`;
+    const calls = extractRefusedFileInvestigations(pythonRefusal);
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].name, 'findFiles');
+    assert.strictEqual(calls[0].args.pattern, '*settings.py');
   });
 });

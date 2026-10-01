@@ -14,10 +14,10 @@ import {
 export const developmentTools = {
   processManager: new FunctionTool({
     name: 'processManager',
-    description: 'Manage long-running background processes and services (e.g. Node.js backend servers, Angular/React/Vite development servers, databases, watchers). Supports starting, listing, reading logs, and stopping background services.',
+    description: 'Manage long-running background processes and services (e.g. backend servers, web development servers, databases, watchers). Supports starting, listing, reading logs, and stopping background services.',
     parameters: z.object({
       action: z.enum(['start', 'list', 'logs', 'stop']).describe('The action to perform: "start" to launch a background service, "list" to list active services, "logs" to read recent stdout/stderr output, "stop" to terminate a service.'),
-      command: z.string().optional().describe('The shell command to execute in the background (required for "start", e.g. "node index.js" or "ng serve --open").'),
+      command: z.string().optional().describe('The shell command to execute in the background (required for "start", e.g. "npm run start" or "node server.js").'),
       name: z.string().optional().describe('A friendly name or label for the process (e.g. "backend", "frontend", "api-server").'),
       processId: z.string().optional().describe('The process ID to inspect or stop (e.g. "proc-1").'),
       pid: z.number().int().optional().describe('Process ID to inspect or stop.'),
@@ -1016,14 +1016,15 @@ export const developmentTools = {
                       const backendCandidate = serverCandidates.find(wf => /(?:backend|server|api)/i.test(wf));
                       targetFilePath = backendCandidate || serverCandidates[0];
                     }
-                  } else if (/(?:@NgModule|HttpClientModule|provideHttpClient|RouterModule|declarations|providers)/.test(textContent)) {
-                    // Angular module / config match
-                    const moduleCandidates = workspaceFiles.filter(wf =>
-                      /(?:app\.module|app\.config|.*\.module)\.ts$/i.test(wf)
-                    );
-                    if (moduleCandidates.length > 0) {
-                      const primary = moduleCandidates.find(wf => /(?:app\.module|app\.config)\.ts$/i.test(wf)) || moduleCandidates[0];
-                      targetFilePath = primary;
+                  } else {
+                    // Try to match candidates based on file extension and identifiers in content
+                    const extMatch = textContent.match(/\.([a-zA-Z0-9]+)\b/);
+                    if (extMatch) {
+                      const ext = extMatch[1].toLowerCase();
+                      const extCandidates = workspaceFiles.filter(wf => wf.endsWith(`.${ext}`));
+                      if (extCandidates.length === 1) {
+                        targetFilePath = extCandidates[0];
+                      }
                     }
                   }
                 }

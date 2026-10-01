@@ -733,50 +733,83 @@ export function extractThinkingProcessToolCalls(thoughtText, text = '', contents
 
 /**
  * Intelligent file investigation helper: Detects when a model hallucinates that it cannot
- * inspect or modify files outside of a specific scope, or tells the user to manually review/check
- * a configuration or module file (e.g. app.module.ts, app.config.ts, package.json).
- * Automatically extracts the file name and dispatches findFiles to locate it in the workspace.
+ * inspect or modify files outside of a specific scope, claims it is in a sandboxed environment,
+ * or tells the user to manually open/edit/review a configuration or source file.
+ * Automatically extracts the file name and dispatches readFile or findFiles/listFiles to locate it in the workspace.
  */
 export function extractRefusedFileInvestigations(text) {
   if (!text || typeof text !== 'string') return [];
   const calls = [];
 
-  const isFileRefusal = /(?:cannot modify.*outside of these specific files|without knowing your\s+[`"']?[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+|manually review your\s+[`"']?[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+|you must manually (?:review|check|edit|update|inspect|modify|fix)|assume you will fix the (?:module|angular|setup))/i.test(text);
+  const isFileOrDirectoryRefusal = /(?:sandboxed environment|cannot.*(?:directly )?(?:open|edit|read|modify|change|write|access|inspect).*files?|do not have the (?:ability|capability|permission) to.*(?:open|edit|read|modify|change|write|access|inspect).*files?|unable to.*(?:open|edit|read|modify|change|write).*files?|cannot.*(?:read|list|view|access|open).*(?:directories|folders|directory|folder)|do not have the (?:ability|capability|permission) to.*(?:read|list|view|access|open).*(?:directories|folders|directory|folder)|cannot modify.*outside of these specific files|without knowing your\s+[`"']?[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+|manually review your\s+[`"']?[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+|you must manually (?:perform|review|check|edit|update|inspect|modify|fix|open|add|change)|manually perform these steps|assume you will fix the (?:module|config|configuration|setup|build))/i.test(text);
 
-  if (!isFileRefusal) return [];
+  if (!isFileOrDirectoryRefusal) return [];
+
+  // Check if it's explicitly a directory reading refusal
+  const isDirRefusal = /(?:cannot.*(?:read|list|view|access|open).*(?:directories|folders|directory|folder)|do not have the (?:ability|capability|permission) to.*(?:read|list|view|access|open).*(?:directories|folders|directory|folder))/i.test(text);
 
   const fileRegexes = [
-    /(?:without knowing your|manually review your|manually check your|manually inspect your|review your|check your)\s+[`"']?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)[`"']?/i,
+    /(?:(?:Navigate|go)\s+to|(?:Open|edit|review|check|inspect)\s+(?:the\s+)?file:?|file:?)\s*(?:Navigate\s+to\s+)?([`"']?)([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)\1/i,
+    /(?:module|configuration|config in|file named|manifest in)\s*\(\s*[`"']?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)[`"']?\s*\)/i,
+    /(?:without knowing your|manually review your|manually check your|manually inspect your|review your|check your|open your)\s+[`"']?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)[`"']?/i,
     /(?:cannot modify.*outside of these specific files.*[`"']?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)[`"']?)/i,
-    /(?:you must manually (?:review|check|edit|update|inspect|modify))\s+[`"']?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)[`"']?/i
+    /(?:you must manually (?:perform|review|check|edit|update|inspect|modify|fix|open|add|change).*?)\s+[`"']?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)[`"']?/i,
+    /([a-zA-Z0-9_\-./]+\.(?:json|js|mjs|cjs|ts|tsx|jsx|html|css|py|md|yml|yaml|go|rs|java|c|cpp|h|php|rb|sh)\b)/i
   ];
 
   let matchedFile = null;
   for (const regex of fileRegexes) {
     const m = text.match(regex);
     if (m && m[1]) {
-      matchedFile = m[1].trim();
-      break;
+      let candidate = m[1].replace(/[\r\n\t]+/g, '').trim();
+      candidate = candidate.replace(/[.,:;)\s]+$/, '').trim();
+      if (candidate.startsWith('/') || candidate.includes('/')) {
+        candidate = candidate.replace(/\s+/g, '');
+      }
+      if (/\.[a-zA-Z0-9]+$/.test(candidate)) {
+        matchedFile = candidate;
+        break;
+      }
     }
   }
 
   if (matchedFile) {
+    // If the matched file exists directly on disk, read it directly!
+    if (fs.existsSync(matchedFile)) {
+      calls.push({
+        name: 'readFile',
+        args: { filePath: matchedFile }
+      });
+      return calls;
+    }
+
     const baseName = path.basename(matchedFile);
+    const parentDir = path.dirname(matchedFile);
+
+    // If parent directory exists on disk, list files in that directory to reveal actual files
+    if (parentDir && parentDir !== '.' && fs.existsSync(parentDir)) {
+      calls.push({
+        name: 'listFiles',
+        args: { directory: parentDir }
+      });
+      return calls;
+    }
+
+    // Otherwise, search for matching files by wildcard
     calls.push({
       name: 'findFiles',
-      args: {
-        pattern: `*${baseName}`
-      }
+      args: { pattern: `*${baseName}` }
+    });
+  } else if (isDirRefusal) {
+    calls.push({
+      name: 'listFiles',
+      args: { directory: '.' }
     });
   } else if (/outside of these specific files|cannot modify.*application structure/i.test(text)) {
-    if (/angular|module|dependency injection|httpclient|providers/i.test(text)) {
-      calls.push({
-        name: 'findFiles',
-        args: {
-          pattern: '*module*.ts'
-        }
-      });
-    }
+    calls.push({
+      name: 'listFiles',
+      args: { directory: '.' }
+    });
   }
 
   return calls;

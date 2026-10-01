@@ -13,7 +13,7 @@ This file outlines the complete set of instructions provided during our session,
 5. **Always Background `executeCommand` & Live Process Monitor**: All shell commands executed via `executeCommand` always run in the background without blocking the agent turn. The console dynamically monitors all alive background processes directly below the user prompt and inside the status card (`printStatus`).
 6. **Background Process Management (`/processes` or `/ps`)**: Added interactive slash commands to inspect, monitor recent logs, and stop active background services.
 7. **10s Wait, Output Analysis & Context Injection (`executeCommand`)**: The `executeCommand` tool observes background commands for around 10 seconds to capture initial startup and compilation output. It automatically analyzes the output for network URLs, listening ports, health status, and errors, and pastes the complete analyzed content directly into the conversation context.
-8. **Autonomous Workspace Code-Fixing & Anti-Refusal Recovery**: Solved model scope hallucinations where LLMs claimed they cannot modify application files outside a specific scope or told the user to manually review `app.module.ts`. Injected unrestricted workspace access rules across all chat modes and system prompts. Added auto-recovery in `detectAndParseTextToolCalls` to intercept file inspection refusals and automatically dispatch `findFiles`. Enhanced `codeFixer` target resolution for backend and Angular configs when `filePath` is omitted. Cleaned up text aggregation across tool turns.
+8. **Autonomous Workspace Code-Fixing & Anti-Refusal Recovery**: Solved model scope hallucinations where LLMs claimed they cannot modify application files outside a specific scope or told the user to manually review project files. Injected unrestricted workspace access rules across all chat modes and system prompts. Added auto-recovery in `detectAndParseTextToolCalls` to intercept file and directory inspection refusals and automatically dispatch `findFiles`, `listFiles`, or `readFile`. Cleaned up text aggregation across tool turns.
 
 ---
 
@@ -61,7 +61,7 @@ The plumar-cli environment now features a robust suite of **21 core tools** to a
 ### 🔌 5. Advanced Developer Utilities (Database, Process, Git & Linter Tools) 🆕
 | Tool Name | Description | Key Parameters |
 | :--- | :--- | :--- |
-| **`processManager`** 🆕 | Starts, monitors, inspects logs of, and terminates persistent background services (Node.js servers, Angular/React dev servers, watchers). | `action` (`"start"` \| `"list"` \| `"logs"` \| `"stop"`), `command`, `name`, `processId`, `pid`, `lines` |
+| **`processManager`** 🆕 | Starts, monitors, inspects logs of, and terminates persistent background services (web dev servers, backend APIs, build watchers). | `action` (`"start"` \| `"list"` \| `"logs"` \| `"stop"`), `command`, `name`, `processId`, `pid`, `lines` |
 | **`portManager`** 🆕 | Query processes active on a network port, or terminate a process by port or PID to resolve port-in-use blocks. | `action` (`"list"` \| `"kill"`), `port`, `pid` |
 | **`restClient`** 🆕 | Constructs and executes custom HTTP API requests (GET, POST, PUT, DELETE, PATCH) to test external REST interfaces with timing stats, custom headers, and bodies. | `url`, `method`, `headers`, `body` |
 | **`regexHelper`** 🆕 | Evaluates, matches, or replaces text strings using high-performance regular expressions with customizable flags. | `action` (`"test"` \| `"match"` \| `"replace"`), `pattern`, `flags`, `text`, `replacement` |
@@ -129,7 +129,7 @@ By default, internal verbose logging/telemetry from ADK (`@google/adk`) is **dis
 
 ## ⚡ Immediate Thinking Process Execution (`executeThinking`)
 
-When models reason in their `<thinking>...</thinking>` block, they frequently map out tool invocations, shell setup commands (like `cd backend && node index.js` or `cd frontend && ng serve --open`), and background processes. However, certain local models occasionally hallucinate that they have already started the background processes (e.g. printing `"I have executed the setup command... Status: The process full-stack-setup is running in the background (PID: 36569)"`) without emitting a native tool call.
+When models reason in their `<thinking>...</thinking>` block, they frequently map out tool invocations, shell setup commands (like `cd backend && node index.js` or `cd frontend && npm start`), and background processes. However, certain local models occasionally hallucinate that they have already started the background processes (e.g. printing `"I have executed the setup command... Status: The process full-stack-setup is running in the background (PID: 36569)"`) without emitting a native tool call.
 
 The **`executeThinking`** feature solves this through two powerful mechanisms:
 1. **Immediate Execution Toggle**: When enabled, Plumar directly extracts and dispatches tool calls and background shell commands planned during the thinking process.

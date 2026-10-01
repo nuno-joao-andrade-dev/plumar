@@ -1359,7 +1359,7 @@ test('21. Process Manager and Background Process Execution', async (t) => {
 
 As a large language model operating in this environment, I do not have the
 ability to run persistent, long-running server processes (like Node.js or
-Angular
+web
 servers) in the background on your local machine. This functionality requires
 direct interaction with your operating system's terminal, which I cannot access
 for persistent operation.
@@ -1372,10 +1372,10 @@ your local terminal:
     cd /home/nandrade/projects/nja.dev/tst/reservation-app/backend
     node index.js
 
-2. For the Frontend (Angular App):
+2. For the Frontend (Web App):
   • Open a second terminal and navigate to the frontend directory:
     cd /home/nandrade/projects/nja.dev/tst/reservation-app/frontend
-    ng serve --open
+    npm run dev
 
 This is the standard procedure for running full-stack applications.`;
 
@@ -1389,7 +1389,7 @@ This is the standard procedure for running full-stack applications.`;
     assert.strictEqual(parsed.calls[1].name, 'executeCommand');
     assert.strictEqual(parsed.calls[1].args.background, true);
     assert.strictEqual(parsed.calls[1].args.name, 'frontend');
-    assert.match(parsed.calls[1].args.command, /cd .*frontend && ng serve --open/);
+    assert.match(parsed.calls[1].args.command, /cd .*frontend && npm run dev/);
   });
 
   await t.test('detectAndParseTextToolCalls: should intercept "cannot directly run application" and recover commands from history', async () => {
@@ -1410,10 +1410,10 @@ This is the standard procedure for running full-stack applications.`;
     cd /home/nandrade/projects/nja.dev/tst/reservation-app/backend
     node index.js
 
-2. For the Frontend (Angular App):
+2. For the Frontend (Web App):
   • Open a second terminal and navigate to the frontend directory:
     cd /home/nandrade/projects/nja.dev/tst/reservation-app/frontend
-    ng serve --open`
+    npm run dev`
         }]
       }
     ];
@@ -1428,7 +1428,7 @@ This is the standard procedure for running full-stack applications.`;
     assert.strictEqual(parsed.calls[1].name, 'executeCommand');
     assert.strictEqual(parsed.calls[1].args.background, true);
     assert.strictEqual(parsed.calls[1].args.name, 'frontend');
-    assert.match(parsed.calls[1].args.command, /cd .*frontend && ng serve --open/);
+    assert.match(parsed.calls[1].args.command, /cd .*frontend && npm run dev/);
   });
 
   await t.test('executeThinking toggle setting: can enable and disable dynamically', () => {
@@ -1453,7 +1453,7 @@ This is the standard procedure for running full-stack applications.`;
   Next Step: Please navigate to your frontend directory and run:
 
     cd /home/nandrade/projects/nja.dev/tst/frontend
-    ng serve --open`;
+    npm run dev`;
 
     const sampleHistory = [
       {
@@ -1466,21 +1466,21 @@ This is the standard procedure for running full-stack applications.`;
     assert.ok(parsed.calls.length >= 1, 'Should extract at least one tool call');
     assert.strictEqual(parsed.calls[0].name, 'executeCommand');
     assert.strictEqual(parsed.calls[0].args.background, true);
-    assert.match(parsed.calls[0].args.command, /backend.*node index\.js|frontend.*ng serve/);
+    assert.match(parsed.calls[0].args.command, /backend.*node index\.js|frontend.*npm run dev/);
   });
 
   await t.test('detectAndParseTextToolCalls: executes thinking process immediately when executeThinking is enabled', () => {
     const initial = isExecuteThinkingEnabled();
     try {
       setExecuteThinkingEnabled(true);
-      const thinking = `1. \`executeCommand\` to set up Angular CLI and create the app (\`ng new frontend --defaults\`)
+      const thinking = `1. \`executeCommand\` to initialize frontend directory (\`npm create vite@latest frontend\`)
 2. \`executeCommand\` to install dependencies in \`frontend\` (\`npm install\`)`;
       const responseText = `Here is the plan for setting up the frontend application.`;
 
       const parsed = detectAndParseTextToolCalls(responseText, null, thinking);
       assert.ok(parsed.calls.length >= 1, 'Should extract tool calls from thinking');
       assert.strictEqual(parsed.calls[0].name, 'executeCommand');
-      assert.strictEqual(parsed.calls[0].args.command, 'ng new frontend --defaults');
+      assert.strictEqual(parsed.calls[0].args.command, 'npm create vite@latest frontend');
     } finally {
       setExecuteThinkingEnabled(initial);
     }
