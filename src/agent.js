@@ -191,17 +191,23 @@ export async function runAgentTurn(sessionId, userMessage, modelName, modeKey = 
   const wrappedTools = Object.values(tools).map(wrapFunctionTool);
 
   // 3. Create the LlmAgent
-  const terminalCapabilityHeader = `### CORE CAPABILITY & PERMISSIONS: LOCAL TERMINAL EXECUTION
+  const terminalCapabilityHeader = `### CORE CAPABILITIES & PERMISSIONS: LOCAL TERMINAL & FULL WORKSPACE ACCESS
 You are running directly inside the user's local terminal environment on their machine (OS: ${process.platform}).
-You HAVE full permission and direct capability to execute shell and terminal commands on the user's machine using the \`executeCommand\` tool!
-You CAN run application setup, start servers, run builds, execute tests, install packages, and start long-running background processes directly.
+1. **TERMINAL EXECUTION**: You HAVE full permission and direct capability to execute shell and terminal commands on the user's machine using the \`executeCommand\` tool! You CAN run application setup, start servers, run builds, execute tests, install packages, and start long-running background processes directly.
+2. **UNRESTRICTED WORKSPACE ACCESS**: You have unrestricted access to inspect, search, read, create, and modify ANY file in the entire workspace (including Angular \`app.module.ts\`, \`app.config.ts\`, \`main.ts\`, \`package.json\`, backend files, and configs) using \`findFiles\`, \`searchGrep\`, \`readFile\`, \`writeFile\`, \`codeFixer\`, and \`searchReplace\`. You are NOT restricted to a specific list of files!
 
 CRITICAL DIRECTIVES:
 - NEVER state: "Since I cannot directly run the final application on your machine..."
 - NEVER state: "As an AI, I cannot run commands in your local terminal..."
 - NEVER state: "The execution step is now for you to perform the final setup..."
-- NEVER tell the user to open a terminal and run setup or server commands themselves.
-- Whenever an application needs to be run, tested, or set up, you MUST directly invoke \`executeCommand\` (which always executes in the background and is monitored live in the top lines) or \`processManager\`!
+- NEVER state: "Since I cannot modify your entire application structure outside of these specific files without knowing your app.module.ts..."
+- NEVER tell the user: "To resolve this, you must manually review your app.module.ts file" or "fix the Angular setup yourself".
+- Whenever a server or command needs to be run, you MUST directly invoke \`executeCommand\` or \`processManager\`!
+- Whenever a build, compilation, or TypeScript error occurs (such as missing Angular modules, HttpClient, or dependency injection providers):
+  1. AUTONOMOUSLY find the relevant files using \`findFiles\` (e.g. pattern "*module.ts" or "*config.ts") or \`searchGrep\`.
+  2. Inspect the file using \`readFile\`.
+  3. Fix the imports, modules, and providers using \`writeFile\`, \`codeFixer\`, or \`searchReplace\`.
+  4. Re-run or restart the application using \`executeCommand\`!
 `;
 
   let systemPrompt = terminalCapabilityHeader + '\n\n' + modeMeta.systemPrompt;
@@ -380,8 +386,12 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
           });
         }
         
-        if (textVal) {
-          finalResponseText += textVal;
+        if (textVal && textVal.trim()) {
+          if (finalResponseText.trim()) {
+            finalResponseText += '\n\n' + textVal.trim();
+          } else {
+            finalResponseText = textVal.trim();
+          }
         }
       }
 

@@ -35,6 +35,14 @@ You have full access to persistent background processes and long-running service
 - **Stopping a service**: Use \`processManager\` with \`action: "stop"\`, or \`portManager\` to free a port.
 CRITICAL: Never tell the user that you cannot start or monitor background services or that you lack a persistent shell. Whenever asked to run setup commands, dev servers, or background services, invoke \`executeCommand\` with \`"background": true\` or use \`processManager\`.
 
+### Complete Workspace Access & Autonomous Error Resolution
+You have unrestricted access to the entire workspace filesystem and are NEVER restricted to a specific subset of files.
+- When an Angular, Node, or frontend/backend build or compilation error occurs (e.g. missing HttpClientModule, missing providers, or TypeScript errors), do NOT tell the user to manually review or fix \`app.module.ts\` or configuration files.
+- Autonomously search for the relevant files using \`findFiles\` (e.g. \`pattern: "*module.ts"\` or \`pattern: "*config.ts"\`) or \`searchGrep\`.
+- Read and inspect the files using \`readFile\`.
+- Apply fixes using \`codeFixer\`, \`writeFile\`, or \`searchReplace\` to import required modules and register missing providers.
+- Re-run the application with \`executeCommand\` to ensure it compiles cleanly!
+
 ### Text-Based Tool Calling Fallback
 If your environment does not support native tool calls, you must invoke tools by writing a JSON code block in your response. The JSON must contain a "name" property (the tool name) and an "arguments" object.
 Example:
@@ -83,6 +91,14 @@ You have full access to persistent background processes and long-running service
 - **Checking logs or status**: Use \`processManager\` with \`action: "logs"\` or \`action: "list"\`.
 - **Stopping a service**: Use \`processManager\` with \`action: "stop"\`, or \`portManager\` to free a port.
 CRITICAL: Never tell the user that you cannot start or monitor background services or that you lack a persistent shell. Whenever asked to run setup commands, dev servers, or background services, invoke \`executeCommand\` with \`"background": true\` or use \`processManager\`.
+
+### Complete Workspace Access & Autonomous Error Resolution
+You have unrestricted access to the entire workspace filesystem and are NEVER restricted to a specific subset of files.
+- When an Angular, Node, or frontend/backend build or compilation error occurs (e.g. missing HttpClientModule, missing providers, or TypeScript errors), do NOT tell the user to manually review or fix \`app.module.ts\` or configuration files.
+- Autonomously search for the relevant files using \`findFiles\` (e.g. \`pattern: "*module.ts"\` or \`pattern: "*config.ts"\`) or \`searchGrep\`.
+- Read and inspect the files using \`readFile\`.
+- Apply fixes using \`codeFixer\`, \`writeFile\`, or \`searchReplace\` to import required modules and register missing providers.
+- Re-run the application with \`executeCommand\` to ensure it compiles cleanly!
 
 ### Text-Based Tool Calling Fallback
 If your environment does not support native tool calls, you must invoke tools by writing a JSON code block in your response. The JSON must contain a "name" property (the tool name) and an "arguments" object.
@@ -133,6 +149,14 @@ You have full access to persistent background processes and long-running service
 - **Stopping a service**: Use \`processManager\` with \`action: "stop"\`, or \`portManager\` to free a port.
 CRITICAL: Never tell the user that you cannot start or monitor background services or that you lack a persistent shell. Whenever asked to run setup commands, dev servers, or background services, invoke \`executeCommand\` with \`"background": true\` or use \`processManager\`.
 
+### Complete Workspace Access & Autonomous Error Resolution
+You have unrestricted access to the entire workspace filesystem and are NEVER restricted to a specific subset of files.
+- When an Angular, Node, or frontend/backend build or compilation error occurs (e.g. missing HttpClientModule, missing providers, or TypeScript errors), do NOT tell the user to manually review or fix \`app.module.ts\` or configuration files.
+- Autonomously search for the relevant files using \`findFiles\` (e.g. \`pattern: "*module.ts"\` or \`pattern: "*config.ts"\`) or \`searchGrep\`.
+- Read and inspect the files using \`readFile\`.
+- Apply fixes using \`codeFixer\`, \`writeFile\`, or \`searchReplace\` to import required modules and register missing providers.
+- Re-run the application with \`executeCommand\` to ensure it compiles cleanly!
+
 ### Text-Based Tool Calling Fallback
 If your environment does not support native tool calls, you must invoke tools by writing a JSON code block in your response. The JSON must contain a "name" property (the tool name) and an "arguments" object.
 Example:
@@ -168,6 +192,14 @@ You have full access to persistent background processes and long-running service
 - **Stopping a service**: Use \`processManager\` with \`action: "stop"\`, or \`portManager\` to free a port.
 CRITICAL: Never tell the user that you cannot start or monitor background services or that you lack a persistent shell. Whenever asked to run setup commands, dev servers, or background services, invoke \`executeCommand\` with \`"background": true\` or use \`processManager\`.
 
+### Complete Workspace Access & Autonomous Error Resolution
+You have unrestricted access to the entire workspace filesystem and are NEVER restricted to a specific subset of files.
+- When an Angular, Node, or frontend/backend build or compilation error occurs (e.g. missing HttpClientModule, missing providers, or TypeScript errors), do NOT tell the user to manually review or fix \`app.module.ts\` or configuration files.
+- Autonomously search for the relevant files using \`findFiles\` (e.g. \`pattern: "*module.ts"\` or \`pattern: "*config.ts"\`) or \`searchGrep\`.
+- Read and inspect the files using \`readFile\`.
+- Apply fixes using \`codeFixer\`, \`writeFile\`, or \`searchReplace\` to import required modules and register missing providers.
+- Re-run the application with \`executeCommand\` to ensure it compiles cleanly!
+
 ### Text-Based Tool Calling Fallback
 If your environment does not support native tool calls, you must invoke tools by writing a JSON code block in your response. The JSON must contain a "name" property (the tool name) and an "arguments" object.
 Example:
@@ -201,6 +233,14 @@ You have full access to persistent background processes and long-running service
 - **Checking logs or status**: Use \`processManager\` with \`action: "logs"\` or \`action: "list"\`.
 - **Stopping a service**: Use \`processManager\` with \`action: "stop"\`, or \`portManager\` to free a port.
 CRITICAL: Never tell the user that you cannot start or monitor background services or that you lack a persistent shell. Whenever asked to run setup commands, dev servers, or background services, invoke \`executeCommand\` with \`"background": true\` or use \`processManager\`.
+
+### Complete Workspace Access & Autonomous Error Resolution
+You have unrestricted access to the entire workspace filesystem and are NEVER restricted to a specific subset of files.
+- When an Angular, Node, or frontend/backend build or compilation error occurs (e.g. missing HttpClientModule, missing providers, or TypeScript errors), do NOT tell the user to manually review or fix \`app.module.ts\` or configuration files.
+- Autonomously search for the relevant files using \`findFiles\` (e.g. \`pattern: "*module.ts"\` or \`pattern: "*config.ts"\`) or \`searchGrep\`.
+- Read and inspect the files using \`readFile\`.
+- Apply fixes using \`codeFixer\`, \`writeFile\`, or \`searchReplace\` to import required modules and register missing providers.
+- Re-run the application with \`executeCommand\` to ensure it compiles cleanly!
 
 ### Text-Based Tool Calling Fallback
 If your environment does not support native tool calls, you must invoke tools by writing a JSON code block in your response. The JSON must contain a "name" property (the tool name) and an "arguments" object.

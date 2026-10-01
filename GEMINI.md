@@ -13,6 +13,7 @@ This file outlines the complete set of instructions provided during our session,
 5. **Always Background `executeCommand` & Live Process Monitor**: All shell commands executed via `executeCommand` always run in the background without blocking the agent turn. The console dynamically monitors all alive background processes directly below the user prompt and inside the status card (`printStatus`).
 6. **Background Process Management (`/processes` or `/ps`)**: Added interactive slash commands to inspect, monitor recent logs, and stop active background services.
 7. **10s Wait, Output Analysis & Context Injection (`executeCommand`)**: The `executeCommand` tool observes background commands for around 10 seconds to capture initial startup and compilation output. It automatically analyzes the output for network URLs, listening ports, health status, and errors, and pastes the complete analyzed content directly into the conversation context.
+8. **Autonomous Workspace Code-Fixing & Anti-Refusal Recovery**: Solved model scope hallucinations where LLMs claimed they cannot modify application files outside a specific scope or told the user to manually review `app.module.ts`. Injected unrestricted workspace access rules across all chat modes and system prompts. Added auto-recovery in `detectAndParseTextToolCalls` to intercept file inspection refusals and automatically dispatch `findFiles`. Enhanced `codeFixer` target resolution for backend and Angular configs when `filePath` is omitted. Cleaned up text aggregation across tool turns.
 
 ---
 

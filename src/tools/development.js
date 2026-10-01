@@ -1011,6 +1011,19 @@ export const developmentTools = {
                     );
                     if (serverCandidates.length === 1) {
                       targetFilePath = serverCandidates[0];
+                    } else if (serverCandidates.length > 1) {
+                      // Prefer backend/ or server/ or api/ entry point
+                      const backendCandidate = serverCandidates.find(wf => /(?:backend|server|api)/i.test(wf));
+                      targetFilePath = backendCandidate || serverCandidates[0];
+                    }
+                  } else if (/(?:@NgModule|HttpClientModule|provideHttpClient|RouterModule|declarations|providers)/.test(textContent)) {
+                    // Angular module / config match
+                    const moduleCandidates = workspaceFiles.filter(wf =>
+                      /(?:app\.module|app\.config|.*\.module)\.ts$/i.test(wf)
+                    );
+                    if (moduleCandidates.length > 0) {
+                      const primary = moduleCandidates.find(wf => /(?:app\.module|app\.config)\.ts$/i.test(wf)) || moduleCandidates[0];
+                      targetFilePath = primary;
                     }
                   }
                 }

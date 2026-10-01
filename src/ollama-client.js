@@ -427,7 +427,7 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     const recoveredCalls = extractRefusedBackgroundCommands(text, contents);
     if (recoveredCalls.length > 0) {
       foundCalls.push(...recoveredCalls);
-      tempText = 'Starting the requested services in the background...';
+      tempText = '';
     }
   }
 
@@ -439,8 +439,19 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
       const thinkingCalls = extractThinkingProcessToolCalls(thoughtText, text, contents);
       if (thinkingCalls.length > 0) {
         foundCalls.push(...thinkingCalls);
-        tempText = 'Executing commands formulated in the thinking process...';
+        tempText = '';
       }
+    }
+  }
+
+  // 7. Intelligent recovery: If model claims it cannot inspect/modify files outside specific files
+  // or tells user to manually review/check/fix a file (e.g. app.module.ts, package.json),
+  // intercept and automatically dispatch findFiles to locate the file in the workspace!
+  if (foundCalls.length === 0 && !isSubCall && text) {
+    const fileRefusalCalls = extractRefusedFileInvestigations(text);
+    if (fileRefusalCalls.length > 0) {
+      foundCalls.push(...fileRefusalCalls);
+      tempText = '';
     }
   }
 
@@ -714,6 +725,57 @@ export function extractThinkingProcessToolCalls(thoughtText, text = '', contents
       if (textCmds.length > 0) {
         return textCmds;
       }
+    }
+  }
+
+  return calls;
+}
+
+/**
+ * Intelligent file investigation helper: Detects when a model hallucinates that it cannot
+ * inspect or modify files outside of a specific scope, or tells the user to manually review/check
+ * a configuration or module file (e.g. app.module.ts, app.config.ts, package.json).
+ * Automatically extracts the file name and dispatches findFiles to locate it in the workspace.
+ */
+export function extractRefusedFileInvestigations(text) {
+  if (!text || typeof text !== 'string') return [];
+  const calls = [];
+
+  const isFileRefusal = /(?:cannot modify.*outside of these specific files|without knowing your\s+[`"']?[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+|manually review your\s+[`"']?[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+|you must manually (?:review|check|edit|update|inspect|modify|fix)|assume you will fix the (?:module|angular|setup))/i.test(text);
+
+  if (!isFileRefusal) return [];
+
+  const fileRegexes = [
+    /(?:without knowing your|manually review your|manually check your|manually inspect your|review your|check your)\s+[`"']?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)[`"']?/i,
+    /(?:cannot modify.*outside of these specific files.*[`"']?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)[`"']?)/i,
+    /(?:you must manually (?:review|check|edit|update|inspect|modify))\s+[`"']?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)[`"']?/i
+  ];
+
+  let matchedFile = null;
+  for (const regex of fileRegexes) {
+    const m = text.match(regex);
+    if (m && m[1]) {
+      matchedFile = m[1].trim();
+      break;
+    }
+  }
+
+  if (matchedFile) {
+    const baseName = path.basename(matchedFile);
+    calls.push({
+      name: 'findFiles',
+      args: {
+        pattern: `*${baseName}`
+      }
+    });
+  } else if (/outside of these specific files|cannot modify.*application structure/i.test(text)) {
+    if (/angular|module|dependency injection|httpclient|providers/i.test(text)) {
+      calls.push({
+        name: 'findFiles',
+        args: {
+          pattern: '*module*.ts'
+        }
+      });
     }
   }
 

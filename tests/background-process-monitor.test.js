@@ -12,6 +12,10 @@ import {
   formatBackgroundProcessesMonitor, 
   printStatus 
 } from '../src/formatter.js';
+import { 
+  detectAndParseTextToolCalls, 
+  extractRefusedFileInvestigations 
+} from '../src/ollama-client.js';
 
 test('Background Execution & Top Lines Monitor Suite', async (t) => {
   await t.test('executeCommand: should always execute in background by default', async () => {
@@ -186,5 +190,33 @@ Error: listen EADDRINUSE: address already in use :::3000
     assert.strictEqual(res.analysis.hasErrors, false);
 
     await stopBackgroundProcess({ processId: res.processId });
+  });
+
+  await t.test('extractRefusedFileInvestigations: should intercept model claiming it cannot modify outside files and extract findFiles', () => {
+    const refusalText = `The attempt to re-run ng serve failed again because the underlying TypeScript errors persist.
+### Final Diagnosis & Solution:
+The core problem lies in how you are trying to inject services ( HttpClient and ReservationService ) into your components. In modern Angular applications, this is typically handled by providing the service in a module (like AppModule ).
+
+Since I cannot modify your entire application structure outside of these specific files without knowing your app.module.ts , the most robust solution is to ensure that the code within the files adheres to standard practices and assume you will fix the module setup if necessary.
+
+To resolve this, you must manually review your app.module.ts file to ensure:
+1. HttpClientModule is imported.
+2. ReservationService is declared and provided in the @NgModule 's providers array.`;
+
+    const calls = extractRefusedFileInvestigations(refusalText);
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].name, 'findFiles');
+    assert.strictEqual(calls[0].args.pattern, '*app.module.ts');
+  });
+
+  await t.test('detectAndParseTextToolCalls: should intercept file refusal and return clean empty text without synthetic prefixes', () => {
+    const refusalText = `Since I cannot modify your entire application structure outside of these specific files without knowing your app.module.ts, you must manually review your app.module.ts file.`;
+    const res = detectAndParseTextToolCalls(refusalText);
+
+    assert.strictEqual(res.calls.length, 1);
+    assert.strictEqual(res.calls[0].name, 'findFiles');
+    assert.strictEqual(res.calls[0].args.pattern, '*app.module.ts');
+    // Ensure no synthetic prefix like "Executing commands formulated in the thinking process..." pollutes the text
+    assert.strictEqual(res.text, '');
   });
 });
