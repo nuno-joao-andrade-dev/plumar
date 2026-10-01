@@ -108,5 +108,48 @@ test('Global Chat Modes Settings Suite', async (t) => {
     assert.equal(CHAT_MODES.code.name, 'Coder');
     assert.equal(CHAT_MODES.coder.temperature, 0.2);
   });
+
+  await t.test('Should display Key column in settings table and support backwards compatibility', async () => {
+    const { printSettingsTable, displaySettingsTable } = await import('../index.js');
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (...args) => {
+      logs.push(args.join(' '));
+    };
+
+    try {
+      displaySettingsTable();
+      const output = logs.join('\n');
+
+      // Verify column headers exist
+      assert.ok(output.includes('Setting'), 'Output should contain Setting column header');
+      assert.ok(output.includes('Key'), 'Output should contain Key column header');
+      assert.ok(output.includes('Value'), 'Output should contain Value column header');
+
+      // Verify specific keys are present in the table
+      assert.ok(output.includes('provider'), 'Output should contain provider key');
+      assert.ok(output.includes('endpoint'), 'Output should contain endpoint key');
+      assert.ok(output.includes('auth'), 'Output should contain auth key');
+      assert.ok(output.includes('execute-thinking'), 'Output should contain execute-thinking key');
+      assert.ok(output.includes('verbose'), 'Output should contain verbose key');
+      assert.ok(output.includes('adk-info'), 'Output should contain adk-info key');
+      assert.ok(output.includes('policy'), 'Output should contain policy key');
+      assert.ok(output.includes('config'), 'Output should contain config key');
+
+      // Test 2-column backwards compatibility when key is absent
+      logs.length = 0;
+      printSettingsTable('2-Column Diagnostics', [
+        { label: 'Input Tokens', value: '100' },
+        { label: 'Output Tokens', value: '200' }
+      ]);
+      const twoColOutput = logs.join('\n');
+      assert.ok(twoColOutput.includes('Input Tokens'));
+      assert.ok(twoColOutput.includes('100'));
+      assert.ok(!twoColOutput.includes('Key'));
+    } finally {
+      console.log = originalLog;
+    }
+  });
 });
 

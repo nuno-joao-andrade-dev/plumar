@@ -169,6 +169,53 @@ export async function populateReadlineHistory(rl, sessionId, service = sessionSe
  * Prints a list of key-value settings in a premium aligned box-drawing ASCII/ANSI table format.
  */
 export function printSettingsTable(title, settings) {
+  const hasKey = settings.some(item => item.key !== undefined);
+
+  if (hasKey) {
+    let maxLabelWidth = 'Setting'.length;
+    let maxKeyWidth = 'Key'.length;
+    let maxValueWidth = 'Value'.length;
+    
+    for (const item of settings) {
+      const labelLen = String(item.label || '').length;
+      const keyLen = String(item.key || '').length;
+      const valueLen = String(item.value || '').length;
+      if (labelLen > maxLabelWidth) maxLabelWidth = labelLen;
+      if (keyLen > maxKeyWidth) maxKeyWidth = keyLen;
+      if (valueLen > maxValueWidth) maxValueWidth = valueLen;
+    }
+    
+    if (maxLabelWidth < 15) maxLabelWidth = 15;
+    if (maxKeyWidth < 12) maxKeyWidth = 12;
+    if (maxValueWidth < 15) maxValueWidth = 15;
+    
+    const topBorder = pc.bold(pc.cyan('┌' + '─'.repeat(maxLabelWidth + 2) + '┬' + '─'.repeat(maxKeyWidth + 2) + '┬' + '─'.repeat(maxValueWidth + 2) + '┐'));
+    const headerBorder = pc.bold(pc.cyan('├' + '─'.repeat(maxLabelWidth + 2) + '┼' + '─'.repeat(maxKeyWidth + 2) + '┼' + '─'.repeat(maxValueWidth + 2) + '┤'));
+    const bottomBorder = pc.bold(pc.cyan('└' + '─'.repeat(maxLabelWidth + 2) + '┴' + '─'.repeat(maxKeyWidth + 2) + '┴' + '─'.repeat(maxValueWidth + 2) + '┘'));
+    
+    console.log(pc.yellow(`\n${title}:`));
+    console.log(topBorder);
+    
+    // Header row
+    const headerLabel = pc.bold('Setting'.padEnd(maxLabelWidth));
+    const headerKey = pc.bold('Key'.padEnd(maxKeyWidth));
+    const headerValue = pc.bold('Value'.padEnd(maxValueWidth));
+    console.log(pc.bold(pc.cyan('│ ')) + headerLabel + pc.bold(pc.cyan(' │ ')) + headerKey + pc.bold(pc.cyan(' │ ')) + headerValue + pc.bold(pc.cyan(' │')));
+    console.log(headerBorder);
+    
+    for (const item of settings) {
+      const paddedLabel = String(item.label || '').padEnd(maxLabelWidth);
+      const paddedKey = String(item.key || '').padEnd(maxKeyWidth);
+      const paddedValue = String(item.value || '').padEnd(maxValueWidth);
+      const coloredLabel = pc.bold(paddedLabel);
+      const coloredKey = pc.yellow(paddedKey);
+      const coloredValue = pc.magenta(paddedValue);
+      console.log(pc.bold(pc.cyan('│ ')) + coloredLabel + pc.bold(pc.cyan(' │ ')) + coloredKey + pc.bold(pc.cyan(' │ ')) + coloredValue + pc.bold(pc.cyan(' │')));
+    }
+    console.log(bottomBorder + '\n');
+    return;
+  }
+
   let maxLabelWidth = 0;
   let maxValueWidth = 0;
   
@@ -206,14 +253,14 @@ export function displaySettingsTable() {
   const provider = getLlmProvider();
   const providerName = provider === 'lmstudio' ? 'LM Studio' : 'Ollama';
   const settingsData = [
-    { label: 'LLM Provider', value: providerName },
-    { label: `${providerName} Endpoint`, value: getOllamaBaseUrl() },
-    { label: `${providerName} Auth`, value: getOllamaAuth() ? '****** (Configured)' : 'None' },
-    { label: 'Execute Thinking', value: isExecuteThinkingEnabled() ? 'ON' : 'OFF' },
-    { label: 'Verbose JSON Logs', value: isVerboseJsonEnabled() ? 'ON' : 'OFF' },
-    { label: 'ADK Info Logs', value: isAdkInfoEnabled() ? 'ON' : 'OFF' },
-    { label: 'Default Tool Policy', value: getDefaultPolicy().toUpperCase() },
-    { label: 'Active Config File', value: activeFile ? activeFile : 'None' }
+    { label: 'LLM Provider', key: 'provider', value: providerName },
+    { label: `${providerName} Endpoint`, key: 'endpoint', value: getOllamaBaseUrl() },
+    { label: `${providerName} Auth`, key: 'auth', value: getOllamaAuth() ? '****** (Configured)' : 'None' },
+    { label: 'Execute Thinking', key: 'execute-thinking', value: isExecuteThinkingEnabled() ? 'ON' : 'OFF' },
+    { label: 'Verbose JSON Logs', key: 'verbose', value: isVerboseJsonEnabled() ? 'ON' : 'OFF' },
+    { label: 'ADK Info Logs', key: 'adk-info', value: isAdkInfoEnabled() ? 'ON' : 'OFF' },
+    { label: 'Default Tool Policy', key: 'policy', value: getDefaultPolicy().toUpperCase() },
+    { label: 'Active Config File', key: 'config', value: activeFile ? activeFile : 'None' }
   ];
   printSettingsTable('Current CLI Settings', settingsData);
 }
@@ -1569,10 +1616,13 @@ export const tool = new FunctionTool({
           const providerName = provider === 'lmstudio' ? 'LM Studio' : 'Ollama';
           if (!arg) {
             displaySettingsTable();
-            console.log(pc.dim(`To switch LLM provider, use: /settings provider <ollama|lmstudio>`));
-            console.log(pc.dim(`To update server endpoint, use: /settings endpoint <url> or /host <url>`));
-            console.log(pc.dim(`To update authentication, use: /settings auth <token_or_header>`));
-            console.log(pc.dim(`To toggle logs, use: /verbose or /adk-info\n`));
+            console.log(pc.dim(`To update any setting, use: /settings <key> <value>`));
+            console.log(pc.dim(`Examples: /settings provider ollama | /settings thinking on | /settings policy allow`));
+            console.log(pc.dim(`To switch LLM provider: /settings provider <ollama|lmstudio>`));
+            console.log(pc.dim(`To update server endpoint: /settings endpoint <url> or /host <url>`));
+            console.log(pc.dim(`To update authentication: /settings auth <token_or_header>`));
+            console.log(pc.dim(`To toggle execute thinking: /settings thinking <on|off> or /execute-thinking`));
+            console.log(pc.dim(`To toggle logs: /verbose or /adk-info\n`));
           } else {
             const parts = arg.split(/\s+/).filter(Boolean);
             const key = parts[0].toLowerCase();
@@ -1671,8 +1721,21 @@ export const tool = new FunctionTool({
               } else {
                 console.log(pc.red(`Invalid policy. Choose from: allow, ask, deny\n`));
               }
+            } else if (['config', 'policy-file'].includes(key)) {
+              if (value) {
+                const loaded = loadPolicyConfig(value);
+                if (loaded) {
+                  console.log(pc.green(`Loaded policy config from: ${pc.bold(value)}\n`));
+                } else {
+                  console.log(pc.red(`Failed to load policy config from: ${value}\n`));
+                }
+              } else {
+                const active = getActivePolicyConfigFile();
+                console.log(`\n📄 ${pc.bold('Active Policy Config File')}: ${pc.magenta(active || 'None')}\n`);
+              }
+              displaySettingsTable();
             } else {
-              console.log(pc.red(`Unknown settings key: "${key}".\nAvailable keys: ollama, auth, verbose, adk-info, execute-thinking, policy\n`));
+              console.log(pc.red(`Unknown settings key: "${key}".\nAvailable keys: provider, endpoint, auth, execute-thinking, verbose, adk-info, policy, config\n`));
             }
           }
           continue;
