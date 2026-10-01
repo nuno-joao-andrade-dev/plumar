@@ -37,9 +37,12 @@ export function adkContentsToOllamaMessages(contents, systemInstruction) {
     if (hasFunctionCall) {
       const toolCalls = [];
       let textContent = '';
+      let thoughtContent = '';
       
       for (const part of parts) {
-        if (part.text && !part.thought) {
+        if (part.thought && part.text) {
+          thoughtContent += `<thinking>\n${part.text.trim()}\n</thinking>\n`;
+        } else if (part.text) {
           textContent += part.text;
         }
         if (part.functionCall) {
@@ -57,9 +60,10 @@ export function adkContentsToOllamaMessages(contents, systemInstruction) {
         }
       }
       
+      const fullContent = (thoughtContent + textContent).trim();
       messages.push({
         role: 'assistant',
-        content: textContent || '',
+        content: fullContent || '',
         tool_calls: toolCalls.length > 0 ? toolCalls : undefined
       });
     } else if (hasFunctionResponse) {
@@ -112,15 +116,19 @@ export function adkContentsToOllamaMessages(contents, systemInstruction) {
       }
     } else {
       let textContent = '';
+      let thoughtContent = '';
       for (const part of parts) {
-        if (part.text && !part.thought) {
+        if (part.thought && part.text) {
+          thoughtContent += `<thinking>\n${part.text.trim()}\n</thinking>\n`;
+        } else if (part.text) {
           textContent += part.text;
         }
       }
       
+      const fullContent = (thoughtContent + textContent).trim();
       messages.push({
         role,
-        content: textContent
+        content: fullContent
       });
     }
   }
@@ -686,7 +694,7 @@ export function extractThinkingProcessToolCalls(thoughtText, text = '', contents
     // Check if thoughtText mentions specific executable commands in backticks
     const backticks = [...thoughtText.matchAll(/`([^`]+)`/g)].map(m => m[1].trim());
     const explicitCmds = backticks.filter(cmd => 
-      /^(?:node|npm|npx|ng|yarn|pnpm|bun|python|python3|flask|uvicorn|cargo|go)\s+/i.test(cmd)
+      /^(?:node|npm|npx|yarn|pnpm|bun|python|python3|flask|uvicorn|cargo|go)\s+/i.test(cmd)
     );
     if (explicitCmds.length > 0) {
       for (const cmd of explicitCmds) {
@@ -695,7 +703,7 @@ export function extractThinkingProcessToolCalls(thoughtText, text = '', contents
           args: {
             command: cmd,
             background: /(?:server|background|long-running)/i.test(thoughtText),
-            name: cmd.includes('ng') ? 'frontend' : 'service'
+            name: /(?:dev|serve|start|frontend|client)/i.test(cmd) ? 'frontend' : 'service'
           },
           rawMatch: cmd
         });
@@ -729,6 +737,28 @@ export function extractThinkingProcessToolCalls(thoughtText, text = '', contents
   }
 
   return calls;
+}
+
+/**
+ * Detects whether a thinking text contains an actionable plan or intended tool steps
+ * that need execution.
+ */
+export function hasActionableThinkingPlan(thoughtText, text = '') {
+  if (!thoughtText || typeof thoughtText !== 'string') return false;
+  
+  // Explicit mentions of tool names
+  const hasToolMentions = /(?:executeCommand|writeFile|makeDirectory|codeFixer|searchReplace|searchGrep|findFiles|readFile|processManager|portManager)/i.test(thoughtText);
+  if (hasToolMentions) return true;
+
+  // Mentions of shell commands, background setup, servers, or dependencies
+  const hasCommandIntent = /(?:(?:run|execute|launch|start|install|build|serve)\s+(?:the\s+)?(?:command|service|server|process|backend|frontend|client|script|dependencies|packages)|(?:npm|yarn|pnpm|bun|node|npx|python|python3|cargo|go)\s+[a-z0-9_\-\.\/]+|`[^`]*(?:npm|node|npx|python|cargo|go|cd|install|run|start|serve)[^`]*`)/i.test(thoughtText);
+  if (hasCommandIntent) return true;
+
+  // Multi-step numbered or bulleted plan
+  const hasNumberedPlan = /(?:(?:plan\s+involved|steps?(?:\s+to\s+execute)?|\b(?:step\s+)?\d+\.)\s*[`a-z0-9_\-\.\/]+)/i.test(thoughtText);
+  if (hasNumberedPlan && /(?:backend|frontend|server|file|dir|create|build|run|execute|setup|install)/i.test(thoughtText)) return true;
+
+  return false;
 }
 
 /**

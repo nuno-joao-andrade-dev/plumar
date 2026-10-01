@@ -75,7 +75,7 @@ export async function executePipeCommand(command, abortSignal) {
   }
 }
 
-import { runAgentTurn, tools, fetchOllamaModels, CHAT_MODES, getDefaultChatMode, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, getSessionTokens, castParameter, getLlmProvider, setLlmProvider, getOllamaHost, setOllamaHost, getLmStudioHost, setLmStudioHost, getLmStudioAuth, setLmStudioAuth, isAutoMinimizeEnabled, setAutoMinimizeEnabled, isExecuteThinkingEnabled, setExecuteThinkingEnabled } from './src/agent.js';
+import { runAgentTurn, refeedThinkingProcess, tools, fetchOllamaModels, CHAT_MODES, getDefaultChatMode, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, getSessionTokens, castParameter, getLlmProvider, setLlmProvider, getOllamaHost, setOllamaHost, getLmStudioHost, setLmStudioHost, getLmStudioAuth, setLmStudioAuth, isAutoMinimizeEnabled, setAutoMinimizeEnabled, isExecuteThinkingEnabled, setExecuteThinkingEnabled } from './src/agent.js';
 import { extractThinkingProcessToolCalls } from './src/ollama-client.js';
 import { loadAndStartMcpServers, getMcpTools } from './src/mcp-client-manager.js';
 import { 
@@ -1558,6 +1558,48 @@ export const tool = new FunctionTool({
           continue;
         }
 
+        else if (command === '/refeed' || command === '/refeed-thinking' || ((command === '/execute-thinking' || command === '/thinking-execute') && ['run', 'now', 'exec', 'execute', 'refeed'].includes((arg || '').trim().toLowerCase()))) {
+          if (!lastTurnThinking) {
+            console.log(pc.yellow(`No thinking process recorded from the previous turn to refeed to the model.\n`));
+          } else {
+            console.log(pc.cyan(`⚡ Refeeding thinking process to the model to execute the plan...\n`));
+
+            const controller = new AbortController();
+            const originalAbortController = currentAbortController;
+            currentAbortController = controller;
+
+            try {
+              console.log(pc.dim(`\nAgent [${CHAT_MODES[activeMode].name}] is executing the thinking plan using ${activeModel}... (Press ESC to cancel)`));
+              const { text, steps, thinkingText } = await refeedThinkingProcess(
+                sessionId,
+                lastTurnThinking,
+                activeModel,
+                activeMode,
+                controller.signal,
+                activeTemperature,
+                activeParameters
+              );
+              if (thinkingText) lastTurnThinking = thinkingText;
+              lastTurnResponseText = text || '';
+
+              console.log();
+              printThinkingProcess(steps);
+              const formattedText = text.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+              const processedText = formatChatResponse(formattedText);
+              console.log(`${pc.magenta(pc.bold(`${CHAT_MODES[activeMode].name} › `))} ${processedText}\n`);
+            } catch (err) {
+              if (controller.signal.aborted || err.message.includes('cancelled by user')) {
+                console.log(pc.red(pc.bold('Execution cancelled by user (ESC).\n')));
+              } else {
+                console.log(pc.red(`Error executing thinking process plan: ${err.message}\n`));
+              }
+            } finally {
+              currentAbortController = originalAbortController;
+            }
+          }
+          continue;
+        }
+
         else if (command === '/execute-thinking' || command === '/thinking-execute') {
           const action = (arg || '').trim().toLowerCase();
           if (['on', 'enable', 'true', 'yes'].includes(action)) {
@@ -1568,21 +1610,21 @@ export const tool = new FunctionTool({
             setExecuteThinkingEnabled(false);
             console.log(pc.yellow(`${pc.bold('Execute Thinking disabled')}: The thinking process will remain thought-only and will not automatically execute.\n`));
             displaySettingsTable();
-          } else if (['run', 'now', 'exec', 'execute'].includes(action)) {
+          } else if (['direct', 'offline'].includes(action)) {
             if (!lastTurnThinking) {
               console.log(pc.yellow(`No thinking process recorded from the previous turn to execute.\n`));
             } else {
-              console.log(pc.cyan(`⚡ Extracting and executing actions from the previous thinking process...\n`));
+              console.log(pc.cyan(`⚡ Extracting and executing direct tool calls from the previous thinking process...\n`));
               const calls = extractThinkingProcessToolCalls(lastTurnThinking, lastTurnResponseText);
               if (calls.length === 0) {
                 console.log(pc.yellow(`No executable commands or tool calls found in the previous thinking process.\n`));
               } else {
                 for (const call of calls) {
-                  const toolFn = tools[call.name];
-                  if (toolFn) {
+                  const toolObj = tools[call.name];
+                  if (toolObj) {
                     console.log(pc.bold(pc.cyan(`▶ Executing ${call.name}:`)), call.args);
                     try {
-                      const res = await toolFn(call.args);
+                      const res = typeof toolObj.execute === 'function' ? await toolObj.execute(call.args) : await toolObj(call.args);
                       console.log(pc.green(`✔ ${call.name} result:`), typeof res === 'object' ? JSON.stringify(res, null, 2) : res);
                     } catch (toolErr) {
                       console.log(pc.red(`✖ ${call.name} error:`), toolErr.message);
@@ -2259,8 +2301,15 @@ export const tool = new FunctionTool({
           console.log(pc.dim(`      If generation is slow, run the ${pc.yellow('/minimize')} command to prune and compress history.`));
         }
 
+        // Check if user is asking to refeed the previous thinking process or execute the plan
+        const isRefeedIntent = /^(?:refeed|refeed (?:the )?(?:plan|thinking(?: process)?)|execute (?:the )?(?:plan|thinking(?: process)?)|run (?:the )?(?:plan|thinking(?: process)?)|refeed the thinking process to execute the plan)\b/i.test(finalPrompt.trim());
+        if (isRefeedIntent && lastTurnThinking) {
+          console.log(pc.cyan('⚡ Refeeding previous thinking process plan to the model for execution...'));
+          finalPrompt = `Execute the plan and steps formulated in your previous thinking process now using the available tools:\n\n<thinking_process_plan>\n${lastTurnThinking}\n</thinking_process_plan>\n\nYou MUST call the necessary tools (e.g. executeCommand, writeFile, makeDirectory, codeFixer, searchReplace) directly to execute each step. Do not just describe them—perform the execution.`;
+        }
+
         const { text, steps, thinkingText } = await runAgentTurn(sessionId, finalPrompt, activeModel, activeMode, controller.signal, activeTemperature, activeParameters);
-        lastTurnThinking = thinkingText || '';
+        lastTurnThinking = thinkingText || lastTurnThinking;
         lastTurnResponseText = text || '';
 
         if (controller.signal.aborted) {

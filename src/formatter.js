@@ -415,7 +415,8 @@ export function printHelp(topic) {
   console.log(`  ${pc.yellow('/info')}         - Display current session diagnostics.`);
   console.log(`  ${pc.yellow('/verbose')}      - Toggle verbose JSON payload logging (disabled by default).`);
   console.log(`  ${pc.yellow('/adk-info')}     - Toggle ADK internal event logging (disabled by default).`);
-  console.log(`  ${pc.yellow('/execute-thinking')} - Toggle or run thinking process execution immediately (/execute-thinking run).`);
+  console.log(`  ${pc.yellow('/execute-thinking')} - Toggle or run thinking process execution (/execute-thinking on|off|run).`);
+  console.log(`  ${pc.yellow('/refeed')}           - Refeed previous thinking process plan to the model to execute the plan.`);
   console.log(`  ${pc.yellow('/processes')}    - List and monitor active background processes and server daemons.`);
   console.log(`  ${pc.yellow('/policy')}       - View or configure allow/ask/deny execution rules for tools.`);
   console.log(`  ${pc.yellow('/settings')}     - View or dynamically switch settings (e.g. LLM Provider, Host, Auth).`);

@@ -5,7 +5,8 @@ import path from 'path';
 import { tools } from '../src/tools.js';
 import { Jimp } from 'jimp';
 import { wrapFunctionTool, resetTurnToolHistory } from '../src/policy-manager.js';
-import { detectAndParseTextToolCalls, extractThinkingProcessToolCalls } from '../src/ollama-client.js';
+import { detectAndParseTextToolCalls, extractThinkingProcessToolCalls, hasActionableThinkingPlan, adkContentsToOllamaMessages } from '../src/ollama-client.js';
+import { refeedThinkingProcess } from '../src/agent.js';
 import { isExecuteThinkingEnabled, setExecuteThinkingEnabled } from '../src/agent-config.js';
 
 test('1. calculator tool', async (t) => {
@@ -1500,6 +1501,47 @@ This is the standard procedure for running full-stack applications.`;
     assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0].name, 'listFiles');
     assert.deepStrictEqual(calls[0].args, { directory: '.' });
+  });
+
+  await t.test('hasActionableThinkingPlan: should detect actionable tools and steps in thinking', () => {
+    const thinkingWithTools = `The previous plan involved:
+    1. makeDirectory for backend
+    2. writeFile for package.json
+    3. executeCommand to run server`;
+    assert.strictEqual(hasActionableThinkingPlan(thinkingWithTools), true);
+
+    const thinkingWithCmd = `I need to run the setup command in the background: \`npm install && npm start\``;
+    assert.strictEqual(hasActionableThinkingPlan(thinkingWithCmd), true);
+
+    const conversationalThinking = `The user is greeting me and asking how I am doing. I will reply politely.`;
+    assert.strictEqual(hasActionableThinkingPlan(conversationalThinking), false);
+  });
+
+  await t.test('adkContentsToOllamaMessages: should preserve thinking process in assistant message context', () => {
+    const contents = [
+      {
+        role: 'user',
+        parts: [{ text: 'Create a backend server' }]
+      },
+      {
+        role: 'model',
+        parts: [
+          { thought: true, text: 'Plan: 1. makeDirectory backend\n2. writeFile index.js' },
+          { text: 'I have planned the backend server creation.' }
+        ]
+      }
+    ];
+
+    const messages = adkContentsToOllamaMessages(contents);
+    assert.strictEqual(messages.length, 2);
+    assert.strictEqual(messages[1].role, 'assistant');
+    assert.ok(messages[1].content.includes('<thinking>'), 'Should preserve thinking in assistant content');
+    assert.ok(messages[1].content.includes('Plan: 1. makeDirectory backend'));
+    assert.ok(messages[1].content.includes('I have planned the backend server creation.'));
+  });
+
+  await t.test('refeedThinkingProcess: function is defined and exported for execution', () => {
+    assert.strictEqual(typeof refeedThinkingProcess, 'function');
   });
 });
 

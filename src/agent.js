@@ -2,6 +2,7 @@ import { LlmAgent, Runner, FileArtifactService, getFunctionCalls, getFunctionRes
 import { getLoadedSkills } from './skills-plugins-manager.js';
 import { PersistentFileSessionService } from './session-manager.js';
 import path from 'node:path';
+import pc from 'picocolors';
 
 // Import from split files
 import { 
@@ -63,7 +64,8 @@ import {
 import {
   Ollama,
   detectAndParseTextToolCalls,
-  fetchOllamaModels
+  fetchOllamaModels,
+  hasActionableThinkingPlan
 } from './ollama-client.js';
 
 // Re-export everything for backwards compatibility
@@ -113,7 +115,8 @@ export {
   setDefaultChatMode,
   Ollama,
   detectAndParseTextToolCalls,
-  fetchOllamaModels
+  fetchOllamaModels,
+  hasActionableThinkingPlan
 };
 
 // Instantiate global PersistentFileSessionService for active session management
@@ -429,12 +432,96 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
       }
     }
   }
+  thinkingText = thinkingText.trim();
+
+  // Refeed the thinking process to the model to execute the plan:
+  // When executeThinking is enabled (or when the model hallucinated execution without calling tools),
+  // and no tools were executed yet in this turn, re-feed the thinking process plan to the model
+  // so the model directly invokes the tools and executes the plan.
+  const isExecutionHallucination = /(?:i have executed|i've executed|status:\s*the process.*is running|started the (?:server|backend|frontend)|has been (?:started|executed) in the background)/i.test(finalResponseText);
+  const shouldAutoRefeed = toolStepCount === 0 &&
+                           (isExecuteThinkingEnabled() || isExecutionHallucination) &&
+                           hasActionableThinkingPlan(thinkingText, finalResponseText);
+
+  if (shouldAutoRefeed && (!abortSignal || !abortSignal.aborted)) {
+    console.log(pc.cyan('\n⚡ Refeeding thinking process plan to the model to execute the plan...'));
+    const refeedPrompt = `You formulated the following plan and execution steps in your thinking process, but no tools have been executed yet:\n\n<thinking_process_plan>\n${thinkingText}\n</thinking_process_plan>\n\nExecute this plan NOW step-by-step using the available tools (e.g. executeCommand, writeFile, makeDirectory, codeFixer, searchReplace). You MUST call the tools directly to perform the planned actions. Do not just describe them—execute them now.`;
+
+    try {
+      let refeedResponseText = '';
+      for await (const event of runner.runAsync({
+        userId: 'default-user',
+        sessionId: sessionId,
+        newMessage: { role: 'user', parts: [{ text: refeedPrompt }] }
+      })) {
+        if (abortSignal && abortSignal.aborted) {
+          throw new Error('Request cancelled by user (ESC)');
+        }
+
+        if (getFunctionResponses(event).length > 0) {
+          toolStepCount++;
+        }
+
+        if (event.content && Array.isArray(event.content.parts)) {
+          const thoughtParts = [];
+          let textVal = '';
+          for (const part of event.content.parts) {
+            if (part.thought) {
+              thoughtParts.push(part);
+            } else if (part.text) {
+              textVal += part.text;
+            }
+          }
+          if (thoughtParts.length > 0) {
+            steps.push({
+              type: 'thought',
+              content: { parts: thoughtParts }
+            });
+            for (const tp of thoughtParts) {
+              if (tp.text) thinkingText += '\n' + tp.text;
+            }
+          }
+          if (textVal && textVal.trim()) {
+            if (refeedResponseText.trim()) {
+              refeedResponseText += '\n\n' + textVal.trim();
+            } else {
+              refeedResponseText = textVal.trim();
+            }
+          }
+        }
+      }
+
+      if (refeedResponseText.trim()) {
+        finalResponseText = refeedResponseText.trim();
+      }
+    } catch (refeedErr) {
+      if (abortSignal && abortSignal.aborted) throw refeedErr;
+      console.log(pc.yellow(`⚠️ Refeed execution note: ${refeedErr.message}`));
+    }
+  }
 
   return {
     text: finalResponseText,
     steps: steps,
     thinkingText: thinkingText.trim()
   };
+}
+
+/**
+ * Refeed a thinking process plan to the model to execute the plan in the current session
+ * @param {string} sessionId
+ * @param {string} thinkingText
+ * @param {string} modelName
+ * @param {string} [modeKey='balanced']
+ * @param {AbortSignal} [abortSignal=null]
+ * @param {number} [customTemperature=null]
+ * @param {Object} [customParameters={}]
+ * @returns {Promise<Object>} Resolves with { text, steps, thinkingText }
+ */
+export async function refeedThinkingProcess(sessionId, thinkingText, modelName, modeKey = 'balanced', abortSignal = null, customTemperature = null, customParameters = {}) {
+  const refeedPrompt = `Execute the plan and steps formulated in the previous thinking process now using the available tools:\n\n<thinking_process_plan>\n${thinkingText}\n</thinking_process_plan>\n\nYou MUST call the necessary tools (e.g. executeCommand, writeFile, makeDirectory, codeFixer, searchReplace) directly to execute each step. Do not just describe them—perform the execution.`;
+
+  return await runAgentTurn(sessionId, refeedPrompt, modelName, modeKey, abortSignal, customTemperature, customParameters);
 }
 
 /**
