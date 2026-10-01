@@ -75,7 +75,7 @@ export async function executePipeCommand(command, abortSignal) {
   }
 }
 
-import { runAgentTurn, tools, fetchOllamaModels, CHAT_MODES, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, getSessionTokens, castParameter, getLlmProvider, setLlmProvider, getOllamaHost, setOllamaHost, getLmStudioHost, setLmStudioHost, getLmStudioAuth, setLmStudioAuth, isAutoMinimizeEnabled, setAutoMinimizeEnabled } from './src/agent.js';
+import { runAgentTurn, tools, fetchOllamaModels, CHAT_MODES, getDefaultChatMode, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, getSessionTokens, castParameter, getLlmProvider, setLlmProvider, getOllamaHost, setOllamaHost, getLmStudioHost, setLmStudioHost, getLmStudioAuth, setLmStudioAuth, isAutoMinimizeEnabled, setAutoMinimizeEnabled } from './src/agent.js';
 import { loadAndStartMcpServers, getMcpTools } from './src/mcp-client-manager.js';
 import { 
   printBanner, 
@@ -521,7 +521,7 @@ async function main() {
       console.log(pc.yellow('\n📊 Session Diagnostics (JSON):'));
       console.log(JSON.stringify({
         activeModel: selectedModel,
-        activeMode: 'balanced',
+        activeMode: getDefaultChatMode() || 'coder',
         sessionId: 'session-bootstrap',
         workspaceRoot: process.cwd(),
         llmProvider: getLlmProvider(),
@@ -597,12 +597,14 @@ async function main() {
     '--policy-default',
     '--prompt', '-p',
     '--model', '-m',
+    '--mode', '-M',
     '--temperature', '-t'
   ];
 
   let promptParts = [];
   let explicitPrompt = null;
   let explicitModel = null;
+  let explicitMode = null;
   let explicitTemperature = null;
 
   for (let i = 2; i < process.argv.length; i++) {
@@ -616,6 +618,10 @@ async function main() {
       } else if (arg === '--model' || arg === '-m') {
         if (i + 1 < process.argv.length) {
           explicitModel = process.argv[i + 1];
+        }
+      } else if (arg === '--mode' || arg === '-M') {
+        if (i + 1 < process.argv.length) {
+          explicitMode = process.argv[i + 1].toLowerCase();
         }
       } else if (arg === '--temperature' || arg === '-t') {
         if (i + 1 < process.argv.length) {
@@ -641,6 +647,14 @@ async function main() {
     }
     if (arg.startsWith('-m=')) {
       explicitModel = arg.split('=')[1];
+      continue;
+    }
+    if (arg.startsWith('--mode=')) {
+      explicitMode = arg.split('=')[1].toLowerCase();
+      continue;
+    }
+    if (arg.startsWith('-M=')) {
+      explicitMode = arg.split('=')[1].toLowerCase();
       continue;
     }
     if (arg.startsWith('--temperature=')) {
@@ -798,7 +812,7 @@ async function main() {
 
     setLlmProvider(selectedProvider);
     const activeModel = selectedModelName;
-    const activeMode = 'balanced';
+    const activeMode = explicitMode || getDefaultChatMode() || 'coder';
     const activeTemperature = explicitTemperature;
     const activeParameters = {};
     const sessionId = 'cli-exec-' + Date.now();
@@ -893,7 +907,7 @@ async function main() {
   }
   let sessionId = 'session-' + Date.now();
   let activeModel = '';
-  let activeMode = 'balanced';
+  let activeMode = explicitMode || getDefaultChatMode() || 'coder';
   let activeTemperature = null;
   let activeParameters = {};
   let alwaysShowOutput = null;
@@ -1704,7 +1718,9 @@ export const tool = new FunctionTool({
             // No argument provided, show modes menu and prompt selection
             printModes(CHAT_MODES, activeMode);
             const modeAnswer = await rl.question(pc.green(pc.bold('Select mode by key › ')));
-            const selectedKey = modeAnswer.trim().toLowerCase();
+            let selectedKey = modeAnswer.trim().toLowerCase();
+            if (selectedKey === 'code' && !CHAT_MODES.code && CHAT_MODES.coder) selectedKey = 'coder';
+            if (selectedKey === 'coder' && !CHAT_MODES.coder && CHAT_MODES.code) selectedKey = 'code';
             
             if (CHAT_MODES[selectedKey]) {
               activeMode = selectedKey;
@@ -1716,8 +1732,10 @@ export const tool = new FunctionTool({
               console.log(pc.red(`Unknown mode key: "${selectedKey}". Switch cancelled.\n`));
             }
           } else {
-            // Direct switch via command, e.g. /mode code
-            const selectedKey = arg.toLowerCase();
+            // Direct switch via command, e.g. /mode coder or /mode code
+            let selectedKey = arg.toLowerCase();
+            if (selectedKey === 'code' && !CHAT_MODES.code && CHAT_MODES.coder) selectedKey = 'coder';
+            if (selectedKey === 'coder' && !CHAT_MODES.coder && CHAT_MODES.code) selectedKey = 'code';
             if (CHAT_MODES[selectedKey]) {
               activeMode = selectedKey;
               console.clear();

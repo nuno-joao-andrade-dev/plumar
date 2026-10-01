@@ -53,7 +53,9 @@ import {
 import {
   CHAT_MODES,
   initChatModes,
-  castParameter
+  castParameter,
+  getDefaultChatMode,
+  setDefaultChatMode
 } from './chat-modes.js';
 
 import {
@@ -103,6 +105,8 @@ export {
   CHAT_MODES,
   initChatModes,
   castParameter,
+  getDefaultChatMode,
+  setDefaultChatMode,
   Ollama,
   detectAndParseTextToolCalls,
   fetchOllamaModels

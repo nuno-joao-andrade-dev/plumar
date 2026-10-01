@@ -829,10 +829,11 @@ export function printStatus(model, mode, modeMeta, temperature = null) {
 export function printModes(chatModes, activeMode) {
   console.log(pc.bold(pc.yellow('\nAvailable Chat Modes:')));
   Object.entries(chatModes).forEach(([key, meta]) => {
-    const isSelected = key === activeMode;
+    if (key === 'code' && chatModes.coder) return; // avoid duplicate display of alias
+    const isSelected = key === activeMode || (key === 'coder' && activeMode === 'code');
     const bullet = isSelected ? pc.bold(pc.green('❯')) : ' ';
     const keyName = isSelected ? pc.bold(pc.green(key)) : pc.dim(key);
-    const details = `${meta.emoji} ${pc.bold(meta.name)} - ${meta.description}`;
+    const details = `${meta.emoji ? meta.emoji + ' ' : ''}${pc.bold(meta.name)} - ${meta.description}`;
     console.log(`  ${bullet} [${keyName}] ${details}`);
   });
   console.log(pc.dim('  Note: You can customize or add custom chat modes in ./.plumar/settings.json\n'));

@@ -93,8 +93,20 @@ test('Global Chat Modes Settings Suite', async (t) => {
     assert.equal(CHAT_MODES.expert.systemPrompt, 'You are an expert.');
 
     // Default system/creative should remain intact since they fallback/get re-initialized
-    // Wait, let's verify if they were re-populated from defaultChatModes when parsed.chatModes didn't define them
     assert.ok(CHAT_MODES.system);
     assert.equal(CHAT_MODES.system.name, 'System Operator');
   });
+
+  await t.test('Should have coder as default chat mode and maintain coder/code alias', async () => {
+    const { CHAT_MODES, initChatModes, getDefaultChatMode } = await import('../src/chat-modes.js');
+    initChatModes();
+
+    assert.equal(getDefaultChatMode(), 'coder');
+    assert.ok(CHAT_MODES.coder);
+    assert.ok(CHAT_MODES.code);
+    assert.equal(CHAT_MODES.coder.name, 'Coder');
+    assert.equal(CHAT_MODES.code.name, 'Coder');
+    assert.equal(CHAT_MODES.coder.temperature, 0.2);
+  });
 });
+

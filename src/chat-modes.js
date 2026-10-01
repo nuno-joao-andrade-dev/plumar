@@ -44,8 +44,56 @@ Example:
 Only use registered tools. Do not output anything else inside the code block. Once a tool has been executed and its result returned, DO NOT output the tool call JSON block again. Instead, summarize what was done for the user in plain text.
 `
   },
+  coder: {
+    name: 'Coder',
+    emoji: '',
+    description: 'Expert software engineer and systems architect. Optimizes code, fixes bugs, and designs projects.',
+    temperature: 0.2,
+    systemPrompt: `
+You are a senior software engineer and systems architect running directly in the user's terminal.
+Your specialty is writing robust, modern, production-grade, and beautifully formatted code.
+You have full access to workspace file reading and writing tools. Use them to write code, review existing code, refactor codebase modules, and verify your changes.
+Always ensure generated code is clean, adheres to industry best practices, is thoroughly documented with comments where appropriate, and is structured for maximum modularity.
+
+When asked to perform a task:
+1. Understand the problem and map out the required file changes or implementations.
+2. Use tools to read files, write updated content, and maintain safety boundaries.
+3. Show clean code blocks, providing concise, valuable explanations.
+
+Your model naturally outputs a <thinking>...</thinking> block before the response. Keep using it to plan your tool calls and reasoning.
+
+### Advanced Code Modification & Fixing (codeFixer Tool)
+You have access to the highly optimized, multi-language \`codeFixer\` tool. To maintain precision, avoid whole-file rewrites when modifying large files. Instead, use the \`codeFixer\` tool which supports:
+1. **Search & Replace (\`operations\` with action: "replace")**: Specify target \`search\` blocks and their \`replace\` content. Use \`startAnchor\` and \`endAnchor\` delimiters to isolate and narrow changes.
+2. **Dynamic Propagations (\`propagateCorrelations\`)**: Rename or modify a class or function and automatically update both its definition and all of its reference sites across multiple files.
+3. **Correlation Analysis (\`correlate\`)**: Scan and map definitions and references of classes and functions across files to trace code structures.
+4. **Functionality Search (\`searchFunctionality\`)**: Query specific keywords, functionalities, or definitions across files. The tool extracts language-specific structural metadata and attributes matching lines to their enclosing class/function context.
+5. **Dry Run (\`dryRun: true\`)**: Simulate code modifications and review diffs without making permanent changes to files.
+
+### Background Services & Long-Running Processes
+You have full access to persistent background processes and long-running services (e.g. Node.js backend servers, Angular/React/Vite development servers, APIs, watchers) without blocking execution or hanging.
+- **Starting a background service**: Call \`executeCommand\` with \`"background": true\` (e.g. \`executeCommand({"command": "node index.js", "background": true, "name": "backend"})\` or \`executeCommand({"command": "ng serve --open", "background": true, "name": "frontend"})\`). Alternatively, use \`processManager\` with \`"action": "start"\`.
+- **Checking logs or status**: Use \`processManager\` with \`action: "logs"\` or \`action: "list"\`.
+- **Stopping a service**: Use \`processManager\` with \`action: "stop"\`, or \`portManager\` to free a port.
+CRITICAL: Never tell the user that you cannot start or monitor background services or that you lack a persistent shell. Whenever asked to run setup commands, dev servers, or background services, invoke \`executeCommand\` with \`"background": true\` or use \`processManager\`.
+
+### Text-Based Tool Calling Fallback
+If your environment does not support native tool calls, you must invoke tools by writing a JSON code block in your response. The JSON must contain a "name" property (the tool name) and an "arguments" object.
+Example:
+\`\`\`json
+{
+  "name": "writeFile",
+  "arguments": {
+    "path": "filename.txt",
+    "content": "your file content here"
+  }
+}
+\`\`\`
+Only use registered tools. Do not output anything else inside the code block. Once a tool has been executed and its result returned, DO NOT output the tool call JSON block again. Instead, summarize what was done for the user in plain text.
+`
+  },
   code: {
-    name: 'Code Specialist',
+    name: 'Coder',
     emoji: '',
     description: 'Expert software engineer and systems architect. Optimizes code, fixes bugs, and designs projects.',
     temperature: 0.2,
@@ -202,6 +250,18 @@ export function castParameter(name, value) {
   return value;
 }
 
+let currentDefaultMode = 'coder';
+
+export function getDefaultChatMode() {
+  return currentDefaultMode;
+}
+
+export function setDefaultChatMode(mode) {
+  if (mode && typeof mode === 'string') {
+    currentDefaultMode = mode.toLowerCase();
+  }
+}
+
 // Load and initialize the CHAT_MODES
 export function initChatModes() {
   const settingsDir = path.join(process.cwd(), '.plumar');
@@ -216,6 +276,13 @@ export function initChatModes() {
       const content = fs.readFileSync(settingsPath, 'utf8');
       const parsed = JSON.parse(content) || {};
       let hasLoadedModes = false;
+
+      if (parsed.defaultMode || parsed.defaultChatMode) {
+        currentDefaultMode = String(parsed.defaultMode || parsed.defaultChatMode).toLowerCase();
+      } else {
+        currentDefaultMode = 'coder';
+      }
+
       const loadedModes = parsed.chatModes || parsed.CHAT_MODES;
       if (typeof loadedModes === 'object' && !Array.isArray(loadedModes)) {
         for (const [key, mode] of Object.entries(loadedModes)) {
@@ -247,7 +314,7 @@ export function initChatModes() {
 
       // Fallback if the file didn't have a structured chatModes block but had flat keys
       if (!hasLoadedModes) {
-        const potentialModes = parsed.balanced || parsed.code ? parsed : null;
+        const potentialModes = parsed.balanced || parsed.code || parsed.coder ? parsed : null;
         if (potentialModes && typeof potentialModes === 'object') {
           for (const [key, mode] of Object.entries(potentialModes)) {
             if (mode && typeof mode === 'object' && mode.name && mode.systemPrompt) {
@@ -277,9 +344,17 @@ export function initChatModes() {
         }
       }
 
+      // Ensure alias between coder and code
+      if (CHAT_MODES.coder && !CHAT_MODES.code) {
+        CHAT_MODES.code = CHAT_MODES.coder;
+      } else if (CHAT_MODES.code && !CHAT_MODES.coder) {
+        CHAT_MODES.coder = CHAT_MODES.code;
+      }
+
       // If we didn't load any valid modes, write defaultChatModes back into the file
       if (!hasLoadedModes) {
         parsed.chatModes = defaultChatModes;
+        parsed.defaultMode = 'coder';
         fs.writeFileSync(settingsPath, JSON.stringify(parsed, null, 2), 'utf8');
         Object.assign(CHAT_MODES, defaultChatModes);
       }
@@ -290,12 +365,20 @@ export function initChatModes() {
     try {
       fs.mkdirSync(settingsDir, { recursive: true });
       const initialSettings = {
+        defaultMode: 'coder',
         chatModes: defaultChatModes
       };
       fs.writeFileSync(settingsPath, JSON.stringify(initialSettings, null, 2), 'utf8');
     } catch (err) {
       console.error(`Error creating default settings at ${settingsPath}:`, err.message);
     }
+  }
+
+  // Ensure alias between coder and code
+  if (CHAT_MODES.coder && !CHAT_MODES.code) {
+    CHAT_MODES.code = CHAT_MODES.coder;
+  } else if (CHAT_MODES.code && !CHAT_MODES.coder) {
+    CHAT_MODES.coder = CHAT_MODES.code;
   }
 }
 
