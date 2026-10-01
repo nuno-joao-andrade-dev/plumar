@@ -1565,8 +1565,26 @@ export const tool = new FunctionTool({
             console.log(pc.cyan(`⚡ Refeeding thinking process to the model to execute the plan...\n`));
 
             const controller = new AbortController();
-            const originalAbortController = currentAbortController;
-            currentAbortController = controller;
+            const oldRawMode = process.stdin.isRaw;
+            const startTime = Date.now();
+
+            const keypressHandler = (chunk, key) => {
+              if (key) {
+                if (key.name === 'escape') {
+                  if (Date.now() - startTime > 100) {
+                    controller.abort();
+                  }
+                } else if (key.ctrl && key.name === 'c') {
+                  shutdown();
+                }
+              }
+            };
+
+            if (process.stdin.setRawMode) {
+              process.stdin.setRawMode(true);
+            }
+            process.stdin.on('keypress', keypressHandler);
+            process.stdin.resume();
 
             try {
               console.log(pc.dim(`\nAgent [${CHAT_MODES[activeMode].name}] is executing the thinking plan using ${activeModel}... (Press ESC to cancel)`));
@@ -1594,7 +1612,13 @@ export const tool = new FunctionTool({
                 console.log(pc.red(`Error executing thinking process plan: ${err.message}\n`));
               }
             } finally {
-              currentAbortController = originalAbortController;
+              process.stdin.removeListener('keypress', keypressHandler);
+              if (process.stdin.setRawMode) {
+                process.stdin.setRawMode(oldRawMode || false);
+              }
+              if (!rl) {
+                process.stdin.pause();
+              }
             }
           }
           continue;
