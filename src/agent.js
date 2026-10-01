@@ -183,7 +183,20 @@ export async function runAgentTurn(sessionId, userMessage, modelName, modeKey = 
   const wrappedTools = Object.values(tools).map(wrapFunctionTool);
 
   // 3. Create the LlmAgent
-  let systemPrompt = modeMeta.systemPrompt;
+  const terminalCapabilityHeader = `### CORE CAPABILITY & PERMISSIONS: LOCAL TERMINAL EXECUTION
+You are running directly inside the user's local terminal environment on their machine (OS: ${process.platform}).
+You HAVE full permission and direct capability to execute shell and terminal commands on the user's machine using the \`executeCommand\` tool!
+You CAN run application setup, start servers, run builds, execute tests, install packages, and start long-running background processes directly.
+
+CRITICAL DIRECTIVES:
+- NEVER state: "Since I cannot directly run the final application on your machine..."
+- NEVER state: "As an AI, I cannot run commands in your local terminal..."
+- NEVER state: "The execution step is now for you to perform the final setup..."
+- NEVER tell the user to open a terminal and run setup or server commands themselves.
+- Whenever an application needs to be run, tested, or set up, you MUST directly invoke \`executeCommand\` (with \`background: true\` for servers or daemons, or without for short commands) or \`processManager\`!
+`;
+
+  let systemPrompt = terminalCapabilityHeader + '\n\n' + modeMeta.systemPrompt;
   const loadedSkills = getLoadedSkills();
   if (Object.keys(loadedSkills).length > 0) {
     systemPrompt += '\n\n### Available Custom Skills\n';

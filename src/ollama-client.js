@@ -240,7 +240,7 @@ function parseRelaxedJson(str) {
 }
 
 // Text-based fallback tool calls detector and parser
-export function detectAndParseTextToolCalls(text) {
+export function detectAndParseTextToolCalls(text, contents = null) {
   const foundCalls = [];
   if (!text) return { text, calls: foundCalls };
 
@@ -417,10 +417,10 @@ export function detectAndParseTextToolCalls(text) {
     }
   }
 
-  // 5. Intelligent recovery: If model outputs a canned refusal claiming it cannot run background processes,
-  // but provided the exact commands and directories for the user to run manually, intercept and execute them!
+  // 5. Intelligent recovery: If model outputs a canned refusal claiming it cannot run background processes or execute commands on the machine,
+  // but provided or was previously given the commands and directories, intercept and execute them!
   if (foundCalls.length === 0) {
-    const recoveredCalls = extractRefusedBackgroundCommands(text);
+    const recoveredCalls = extractRefusedBackgroundCommands(text, contents);
     if (recoveredCalls.length > 0) {
       foundCalls.push(...recoveredCalls);
       tempText = 'Starting the requested services in the background...';
@@ -429,7 +429,9 @@ export function detectAndParseTextToolCalls(text) {
 
   // Strip found calls from text
   for (const call of foundCalls) {
-    tempText = tempText.replace(call.rawMatch, '');
+    if (call.rawMatch) {
+      tempText = tempText.replace(call.rawMatch, '');
+    }
   }
 
   return {
@@ -439,17 +441,10 @@ export function detectAndParseTextToolCalls(text) {
 }
 
 /**
- * Intelligent recovery helper: Detects when a model outputs a canned refusal claiming
- * it cannot run persistent servers in the background, but gave the user the exact
- * commands to run manually (e.g. backend / frontend commands).
- * Parses those commands out and automatically transforms them into executeCommand calls.
+ * Parses executable terminal/server commands from text formatted as sections, bullet points, or code blocks.
  */
-export function extractRefusedBackgroundCommands(text) {
+export function parseCommandsFromText(text) {
   if (!text || typeof text !== 'string') return [];
-
-  const isBackgroundRefusal = /(?:do not have|cannot|unable to|no access to).*(?:persistent|background).*(?:server|process|operation|terminal|environment)|as a (?:large )?language model.*(?:persistent|server|terminal|background)/is.test(text);
-  if (!isBackgroundRefusal) return [];
-
   const foundCommands = [];
 
   // Pattern A: Numbered/bulleted sections like "1. For the Backend... cd ... node ..."
@@ -500,7 +495,7 @@ export function extractRefusedBackgroundCommands(text) {
     }
   }
 
-  // Pattern B: Fallback if no sections matched, check for code blocks with server commands
+  // Pattern B: Code blocks
   if (foundCommands.length === 0) {
     const codeBlockRegex = /```(?:bash|sh|zsh)?\s*([\s\S]*?)```/gi;
     let cbMatch;
@@ -541,6 +536,38 @@ export function extractRefusedBackgroundCommands(text) {
   }
 
   return foundCommands;
+}
+
+/**
+ * Intelligent recovery helper: Detects when a model outputs a canned refusal claiming
+ * it cannot run persistent servers in the background or cannot execute commands on the machine,
+ * and recovers commands either from the refusal text itself or previous turns in contents.
+ */
+export function extractRefusedBackgroundCommands(text, contents = null) {
+  if (!text || typeof text !== 'string') return [];
+
+  const isExecutionRefusal = /(?:cannot|can't|unable to|do not have(?: the ability)?|no access to).*(?:directly run|run|execute|access|perform).*(?:machine|terminal|local|command|application|server|process|environment|setup)|as a (?:large )?language model.*(?:terminal|machine|local|run|execute|server|process)/is.test(text);
+  if (!isExecutionRefusal) return [];
+
+  const fromCurrentText = parseCommandsFromText(text);
+  if (fromCurrentText.length > 0) return fromCurrentText;
+
+  // Fallback: If refusal did not include commands, scan previous turn contents for commands
+  if (contents && Array.isArray(contents)) {
+    for (let i = contents.length - 1; i >= 0; i--) {
+      const c = contents[i];
+      for (const p of (c.parts || [])) {
+        if (p.text && typeof p.text === 'string') {
+          const fromHistory = parseCommandsFromText(p.text);
+          if (fromHistory.length > 0) {
+            return fromHistory;
+          }
+        }
+      }
+    }
+  }
+
+  return [];
 }
 
 export function isValidImageBuffer(buffer) {
@@ -1075,7 +1102,7 @@ export class Ollama extends BaseLlm {
     const nativeToolCalls = message.tool_calls;
     const textToolCalls = [];
     if (!nativeToolCalls || nativeToolCalls.length === 0) {
-      const parsed = detectAndParseTextToolCalls(text);
+      const parsed = detectAndParseTextToolCalls(text, llmRequest.contents);
       text = parsed.text;
       textToolCalls.push(...parsed.calls);
 

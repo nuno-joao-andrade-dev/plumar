@@ -1390,7 +1390,47 @@ This is the standard procedure for running full-stack applications.`;
     assert.strictEqual(parsed.calls[1].args.name, 'frontend');
     assert.match(parsed.calls[1].args.command, /cd .*frontend && ng serve --open/);
   });
+
+  await t.test('detectAndParseTextToolCalls: should intercept "cannot directly run application" and recover commands from history', async () => {
+    const refusalText = `Since I cannot directly run the final application on your machine (as it
+  requires running commands in your local terminal), the execution step is now for
+  you to perform the final setup.`;
+
+    const sampleHistory = [
+      {
+        role: 'user',
+        parts: [{ text: 'run the application in the background' }]
+      },
+      {
+        role: 'model',
+        parts: [{
+          text: `1. For the Backend (Node.js Server):
+  • Open a terminal and navigate to the backend directory:
+    cd /home/nandrade/projects/nja.dev/tst/reservation-app/backend
+    node index.js
+
+2. For the Frontend (Angular App):
+  • Open a second terminal and navigate to the frontend directory:
+    cd /home/nandrade/projects/nja.dev/tst/reservation-app/frontend
+    ng serve --open`
+        }]
+      }
+    ];
+
+    const parsed = detectAndParseTextToolCalls(refusalText, sampleHistory);
+    assert.strictEqual(parsed.calls.length, 2);
+    assert.strictEqual(parsed.calls[0].name, 'executeCommand');
+    assert.strictEqual(parsed.calls[0].args.background, true);
+    assert.strictEqual(parsed.calls[0].args.name, 'backend');
+    assert.match(parsed.calls[0].args.command, /cd .*backend && node index\.js/);
+
+    assert.strictEqual(parsed.calls[1].name, 'executeCommand');
+    assert.strictEqual(parsed.calls[1].args.background, true);
+    assert.strictEqual(parsed.calls[1].args.name, 'frontend');
+    assert.match(parsed.calls[1].args.command, /cd .*frontend && ng serve --open/);
+  });
 });
+
 
 
 
