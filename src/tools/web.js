@@ -58,21 +58,29 @@ export const webTools = {
     parameters: z.object({
       url: z.string().url().describe('The destination URL of the REST API (e.g. "https://api.github.com/users/octocat").'),
       method: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH']).optional().default('GET').describe('The HTTP method to use.'),
-      headers: z.record(z.string()).optional().describe('Key-value pairs for HTTP headers.'),
-      body: z.string().optional().describe('The body string to send (e.g. raw JSON).')
+      headers: z.union([z.record(z.string()), z.string()]).optional().describe('Key-value pairs for HTTP headers.'),
+      body: z.union([z.string(), z.record(z.any())]).optional().describe('The body string or JSON object to send.')
     }),
     execute: async ({ url, method = 'GET', headers = {}, body }) => {
       try {
         const startTime = Date.now();
+        let parsedHeaders = headers || {};
+        if (typeof parsedHeaders === 'string') {
+          try {
+            parsedHeaders = JSON.parse(parsedHeaders);
+          } catch {
+            parsedHeaders = {};
+          }
+        }
         const fetchOptions = {
-          method,
+          method: String(method || 'GET').toUpperCase(),
           headers: {
             'Content-Type': 'application/json',
-            ...headers
+            ...parsedHeaders
           }
         };
-        if (body && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-          fetchOptions.body = body;
+        if (body !== undefined && body !== null && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(fetchOptions.method)) {
+          fetchOptions.body = typeof body === 'string' ? body : JSON.stringify(body);
         }
 
         const response = await fetch(url, fetchOptions);

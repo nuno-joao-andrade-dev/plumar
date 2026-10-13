@@ -4,7 +4,7 @@
   "engines": {
     "node": ">=22"
   },
-  "description": "plumar-cli - A small agent chat app in the command line using Vercel AI SDK and Ollama",
+  "description": "plumar-cli - Autonomous AI coding & developer CLI agent powered by Google ADK, Ollama, and LM Studio",
   "author": "Nuno João Andrade",
   "license": "MIT",
   "main": "index.js",
@@ -14,7 +14,9 @@
     "plumar-cli": "./index.js"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node --test tests/tools.test.js tests/agent.test.js tests/background-process-monitor.test.js tests/write-file-guarantee.test.js",
+    "test:e2e": "node --test tests/e2e.test.js"
   },
   "dependencies": {
     "@google/adk": "^1.2.0",

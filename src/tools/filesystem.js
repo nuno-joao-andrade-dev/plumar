@@ -102,15 +102,30 @@ export const filesystemTools = {
     parameters: z.object({
       filePath: z.string().optional().describe('The relative path of the file to write'),
       path: z.string().optional().describe('Alternative parameter name for filePath'),
-      content: z.string().describe('The text content to write to the file'),
+      file: z.string().optional().describe('Alternative parameter name for filePath'),
+      filename: z.string().optional().describe('Alternative parameter name for filePath'),
+      targetFile: z.string().optional().describe('Alternative parameter name for filePath'),
+      TargetFile: z.string().optional().describe('Alternative parameter name for filePath'),
+      content: z.string().optional().describe('The text content to write to the file'),
+      CodeContent: z.string().optional().describe('Alternative parameter name for content'),
+      code: z.string().optional().describe('Alternative parameter name for content'),
+      text: z.string().optional().describe('Alternative parameter name for content'),
     }),
     execute: async (args = {}) => {
       try {
-        const filePath = args.filePath || args.path;
+        const filePath = args.filePath || args.path || args.file || args.filename || args.targetFile || args.TargetFile || args.destination;
         if (!filePath) {
           return { success: false, error: 'Missing required parameter: filePath or path' };
         }
-        const content = args.content !== undefined ? args.content : '';
+        const content = args.content !== undefined 
+          ? args.content 
+          : (args.CodeContent !== undefined 
+              ? args.CodeContent 
+              : (args.code !== undefined 
+                  ? args.code 
+                  : (args.text !== undefined 
+                      ? args.text 
+                      : (args.data !== undefined ? args.data : (args.body !== undefined ? args.body : '')))));
         const targetPath = resolveSafePath(filePath);
         
         // Ensure directory structure exists
@@ -177,15 +192,27 @@ export const filesystemTools = {
     parameters: z.object({
       filePath: z.string().optional().describe('The relative path of the file to append to'),
       path: z.string().optional().describe('Alternative parameter name for filePath'),
-      content: z.string().describe('The text content to append'),
+      file: z.string().optional().describe('Alternative parameter name for filePath'),
+      filename: z.string().optional().describe('Alternative parameter name for filePath'),
+      targetFile: z.string().optional().describe('Alternative parameter name for filePath'),
+      TargetFile: z.string().optional().describe('Alternative parameter name for filePath'),
+      content: z.string().optional().describe('The text content to append'),
+      text: z.string().optional().describe('Alternative parameter name for content'),
+      code: z.string().optional().describe('Alternative parameter name for content'),
     }),
     execute: async (args = {}) => {
       try {
-        const filePath = args.filePath || args.path;
+        const filePath = args.filePath || args.path || args.file || args.filename || args.targetFile || args.TargetFile;
         if (!filePath) {
           return { success: false, error: 'Missing required parameter: filePath or path' };
         }
-        const content = args.content !== undefined ? args.content : '';
+        const content = args.content !== undefined 
+          ? args.content 
+          : (args.text !== undefined 
+              ? args.text 
+              : (args.code !== undefined 
+                  ? args.code 
+                  : (args.CodeContent !== undefined ? args.CodeContent : '')));
         const targetPath = resolveSafePath(filePath);
         
         // Ensure directory structure exists (just in case)

@@ -75,9 +75,11 @@ export async function executePipeCommand(command, abortSignal) {
   }
 }
 
-import { runAgentTurn, refeedThinkingProcess, tools, fetchOllamaModels, CHAT_MODES, getDefaultChatMode, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, getSessionTokens, castParameter, getLlmProvider, setLlmProvider, getOllamaHost, setOllamaHost, getLmStudioHost, setLmStudioHost, getLmStudioAuth, setLmStudioAuth, isAutoMinimizeEnabled, setAutoMinimizeEnabled, isExecuteThinkingEnabled, setExecuteThinkingEnabled } from './src/agent.js';
+import { runAgentTurn, refeedThinkingProcess, resetTurnToolHistory, tools, fetchOllamaModels, CHAT_MODES, getDefaultChatMode, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, checkToolPermission, getSessionTokens, castParameter, getLlmProvider, setLlmProvider, getOllamaHost, setOllamaHost, getLmStudioHost, setLmStudioHost, getLmStudioAuth, setLmStudioAuth, isAutoMinimizeEnabled, setAutoMinimizeEnabled, isExecuteThinkingEnabled, setExecuteThinkingEnabled, getMaxToolSteps, setMaxToolSteps } from './src/agent.js';
 import { extractThinkingProcessToolCalls } from './src/ollama-client.js';
 import { loadAndStartMcpServers, getMcpTools } from './src/mcp-client-manager.js';
+import { createCliCompleter } from './src/completer.js';
+import { stripTerminalQueryGarbage } from './src/terminal-io.js';
 import { 
   printBanner, 
   printHelp, 
@@ -98,6 +100,7 @@ import {
   getAliveBackgroundProcesses, 
   listBackgroundProcesses, 
   stopBackgroundProcess, 
+  stopAllBackgroundProcesses,
   getBackgroundProcessLogs, 
   isProcessAlive 
 } from './src/tools/process-registry.js';
@@ -265,6 +268,7 @@ export function displaySettingsTable() {
     { label: `${providerName} Endpoint`, key: 'endpoint', value: getOllamaBaseUrl() },
     { label: `${providerName} Auth`, key: 'auth', value: getOllamaAuth() ? '****** (Configured)' : 'None' },
     { label: 'Execute Thinking', key: 'execute-thinking', value: isExecuteThinkingEnabled() ? 'ON' : 'OFF' },
+    { label: 'Max Tool Steps', key: 'max-tool-steps', value: `${getMaxToolSteps()}` },
     { label: 'Verbose JSON Logs', key: 'verbose', value: isVerboseJsonEnabled() ? 'ON' : 'OFF' },
     { label: 'ADK Info Logs', key: 'adk-info', value: isAdkInfoEnabled() ? 'ON' : 'OFF' },
     { label: 'Default Tool Policy', key: 'policy', value: getDefaultPolicy().toUpperCase() },
@@ -287,26 +291,18 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
     let lmStudioError = null;
 
     const ollamaPromise = (async () => {
-      const oldProvider = getLlmProvider();
       try {
-        setLlmProvider('ollama');
-        ollamaModels = await fetchOllamaModels(true);
+        ollamaModels = await fetchOllamaModels(true, 'ollama');
       } catch (err) {
         ollamaError = err.message;
-      } finally {
-        setLlmProvider(oldProvider);
       }
     })();
 
     const lmStudioPromise = (async () => {
-      const oldProvider = getLlmProvider();
       try {
-        setLlmProvider('lmstudio');
-        lmStudioModels = await fetchOllamaModels(true);
+        lmStudioModels = await fetchOllamaModels(true, 'lmstudio');
       } catch (err) {
         lmStudioError = err.message;
-      } finally {
-        setLlmProvider(oldProvider);
       }
     })();
 
@@ -503,6 +499,17 @@ async function main() {
     setExecuteThinkingEnabled(true);
   }
 
+  // Parse max tool steps per turn flag
+  const maxStepsIdx = process.argv.findIndex(arg => arg === '--max-tool-steps' || arg === '--max-steps');
+  if (maxStepsIdx !== -1 && maxStepsIdx + 1 < process.argv.length) {
+    setMaxToolSteps(process.argv[maxStepsIdx + 1]);
+  } else {
+    const maxStepsEq = process.argv.find(arg => arg.startsWith('--max-tool-steps=') || arg.startsWith('--max-steps='));
+    if (maxStepsEq) {
+      setMaxToolSteps(maxStepsEq.split('=')[1]);
+    }
+  }
+
   // Parse tool policy config file first
   let policyConfigPath = null;
   const configIndex = process.argv.findIndex(arg => arg === '--policy-config');
@@ -662,7 +669,8 @@ async function main() {
     '--prompt', '-p',
     '--model', '-m',
     '--mode', '-M',
-    '--temperature', '-t'
+    '--temperature', '-t',
+    '--max-tool-steps', '--max-steps'
   ];
 
   let promptParts = [];
@@ -825,8 +833,7 @@ async function main() {
       // Query Ollama and LM Studio models
       const ollamaPromise = (async () => {
         try {
-          setLlmProvider('ollama');
-          return await fetchOllamaModels(true);
+          return await fetchOllamaModels(true, 'ollama');
         } catch (e) {
           return [];
         }
@@ -834,8 +841,7 @@ async function main() {
 
       const lmStudioPromise = (async () => {
         try {
-          setLlmProvider('lmstudio');
-          return await fetchOllamaModels(true);
+          return await fetchOllamaModels(true, 'lmstudio');
         } catch (e) {
           return [];
         }
@@ -886,6 +892,7 @@ async function main() {
     }
 
     try {
+      resetTurnToolHistory();
       const { text, steps } = await runAgentTurn(
         sessionId,
         finalCommandLinePrompt,
@@ -902,7 +909,7 @@ async function main() {
       }
 
       // Print final response
-      const formattedText = text.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+      const formattedText = text.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '');
       const processedText = formatChatResponse(formattedText);
       if (isQuiet) {
         process.stdout.write(processedText);
@@ -924,7 +931,13 @@ async function main() {
     return;
   }
 
-  const rl = readline.createInterface({ input, output });
+  const rl = readline.createInterface({
+    input,
+    output,
+    completer: createCliCompleter({
+      getToolNames: () => Object.keys(tools)
+    })
+  });
 
   // Wrap rl.question to clean up any terminal query response fragments from returned user input
   const originalQuestion = rl.question.bind(rl);
@@ -933,28 +946,16 @@ async function main() {
     rl.cursor = 0;
     let answer = await originalQuestion(query, options);
     if (typeof answer === 'string') {
-      // 1. Standard patterns (fully escaped)
-      answer = answer.replace(/\x1b\](?:10|11|4);[^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
-      answer = answer.replace(/\u001b\](?:10|11|4);[^\x07\u001b]*(?:\x07|\u001b\\)/g, '');
-      answer = answer.replace(/\x1b\[\d+(?:;\d+)*R/g, '');
-      answer = answer.replace(/\u001b\[\d+(?:;\d+)*R/g, '');
-      answer = answer.replace(/\x1b\[\??\d+(?:;\d+)*c/g, '');
-      answer = answer.replace(/\u001b\[\??\d+(?:;\d+)*c/g, '');
-      answer = answer.replace(/\x1b\[>\d+(?:;\d+)*c/g, '');
-      answer = answer.replace(/\u001b\[>\d+(?:;\d+)*c/g, '');
-
-      // 2. Fragment-resistant patterns
+      answer = stripTerminalQueryGarbage(answer);
       answer = answer.replace(/\x1b\](?:10|11|4);?/g, '');
       answer = answer.replace(/\u001b\](?:10|11|4);?/g, '');
-      // Match rgb: prefix and any hex digits/slashes first to prevent split fragments like rgb: remaining
       answer = answer.replace(/rgb:[0-9a-fA-F/]*/gi, '');
       answer = answer.replace(/\/?(?:[0-9a-fA-F]{1,4}\/)*[0-9a-fA-F]{1,4}(?:\x07|\x1b\\)/gi, '');
       answer = answer.replace(/\/?(?:[0-9a-fA-F]{1,4}\/)+[0-9a-fA-F]{1,4}/gi, '');
       answer = answer.replace(/\d+;rgb:/gi, '');
       answer = answer.replace(/\b10;\b/g, '');
       answer = answer.replace(/\b11;\b/g, '');
-      answer = answer.replace(/\b\d+;\d+R\b/gi, '');
-      answer = answer.replace(/\b\d+R\b/gi, '');
+      answer = answer.replace(/;\d+R\b/gi, '');
       answer = answer.replace(/[\x07]/g, '');
     }
     return answer;
@@ -982,7 +983,13 @@ async function main() {
   ];
 
   // Graceful exit handler
-  const shutdown = () => {
+  const shutdown = async () => {
+    try {
+      const stopped = await stopAllBackgroundProcesses();
+      if (stopped.length > 0) {
+        console.log(pc.dim(`\nStopped ${stopped.length} active background process(es): ${stopped.join(', ')}`));
+      }
+    } catch {}
     try {
       const tokens = getSessionTokens();
       const tokenSettings = [
@@ -1602,7 +1609,7 @@ export const tool = new FunctionTool({
 
               console.log();
               printThinkingProcess(steps);
-              const formattedText = text.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+              const formattedText = text.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '');
               const processedText = formatChatResponse(formattedText);
               console.log(`${pc.magenta(pc.bold(`${CHAT_MODES[activeMode].name} › `))} ${processedText}\n`);
             } catch (err) {
@@ -1646,6 +1653,11 @@ export const tool = new FunctionTool({
                 for (const call of calls) {
                   const toolObj = tools[call.name];
                   if (toolObj) {
+                    const allowed = await checkToolPermission(call.name, call.args);
+                    if (!allowed) {
+                      console.log(pc.red(`✖ ${call.name} skipped: Execution blocked by tool policy.`));
+                      continue;
+                    }
                     console.log(pc.bold(pc.cyan(`▶ Executing ${call.name}:`)), call.args);
                     try {
                       const res = typeof toolObj.execute === 'function' ? await toolObj.execute(call.args) : await toolObj(call.args);
@@ -1858,6 +1870,15 @@ export const tool = new FunctionTool({
                 console.log(pc.green(`Execute Thinking toggled to: ${pc.bold(isExecuteThinkingEnabled() ? 'ON' : 'OFF')}\n`));
               }
               displaySettingsTable();
+            } else if (['max-tool-steps', 'max-steps', 'maxtoolsteps', 'tool-steps'].includes(key)) {
+              const parsed = parseInt(value, 10);
+              if (!isNaN(parsed) && parsed >= 1) {
+                const updated = setMaxToolSteps(parsed);
+                console.log(pc.green(`Max tool steps per turn set to: ${pc.bold(String(updated))}\n`));
+                displaySettingsTable();
+              } else {
+                console.log(pc.red(`Please specify a positive integer (1 - 200), e.g.: /settings max-tool-steps 25\n`));
+              }
             } else if (key === 'policy') {
               if (['allow', 'ask', 'deny'].includes(value.toLowerCase())) {
                 setDefaultPolicy(value.toLowerCase());
@@ -1880,7 +1901,7 @@ export const tool = new FunctionTool({
               }
               displaySettingsTable();
             } else {
-              console.log(pc.red(`Unknown settings key: "${key}".\nAvailable keys: provider, endpoint, auth, execute-thinking, verbose, adk-info, policy, config\n`));
+              console.log(pc.red(`Unknown settings key: "${key}".\nAvailable keys: provider, endpoint, auth, execute-thinking, max-tool-steps, verbose, adk-info, policy, config\n`));
             }
           }
           continue;
@@ -2332,6 +2353,7 @@ export const tool = new FunctionTool({
           finalPrompt = `Execute the plan and steps formulated in your previous thinking process now using the available tools:\n\n<thinking_process_plan>\n${lastTurnThinking}\n</thinking_process_plan>\n\nYou MUST call the necessary tools (e.g. executeCommand, writeFile, makeDirectory, codeFixer, searchReplace) directly to execute each step. Do not just describe them—perform the execution.`;
         }
 
+        resetTurnToolHistory();
         const { text, steps, thinkingText } = await runAgentTurn(sessionId, finalPrompt, activeModel, activeMode, controller.signal, activeTemperature, activeParameters);
         lastTurnThinking = thinkingText || lastTurnThinking;
         lastTurnResponseText = text || '';
@@ -2346,7 +2368,7 @@ export const tool = new FunctionTool({
         printThinkingProcess(steps);
 
         // Print final assistant response text
-        const formattedText = text.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+        const formattedText = text.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '');
         const processedText = formatChatResponse(formattedText);
         console.log(`${pc.magenta(pc.bold(`${CHAT_MODES[activeMode].name} › `))} ${processedText}\n`);
 

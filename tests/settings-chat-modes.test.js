@@ -132,6 +132,7 @@ test('Global Chat Modes Settings Suite', async (t) => {
       assert.ok(output.includes('endpoint'), 'Output should contain endpoint key');
       assert.ok(output.includes('auth'), 'Output should contain auth key');
       assert.ok(output.includes('execute-thinking'), 'Output should contain execute-thinking key');
+      assert.ok(output.includes('max-tool-steps'), 'Output should contain max-tool-steps key');
       assert.ok(output.includes('verbose'), 'Output should contain verbose key');
       assert.ok(output.includes('adk-info'), 'Output should contain adk-info key');
       assert.ok(output.includes('policy'), 'Output should contain policy key');
@@ -151,5 +152,25 @@ test('Global Chat Modes Settings Suite', async (t) => {
       console.log = originalLog;
     }
   });
+
+  await t.test('Should configure and persist maxToolSteps in settings.json', async () => {
+    const { getMaxToolSteps, setMaxToolSteps } = await import('../src/agent-config.js');
+    const initial = getMaxToolSteps();
+    assert.ok(initial >= 1);
+
+    const updated = setMaxToolSteps(40);
+    assert.equal(updated, 40);
+    assert.equal(getMaxToolSteps(), 40);
+
+    const settingsPath = path.join(testTempDir, '.plumar', 'settings.json');
+    const content = await fs.readFile(settingsPath, 'utf8');
+    const parsed = JSON.parse(content);
+    assert.equal(parsed.maxToolSteps, 40);
+
+    // Restore default
+    setMaxToolSteps(25);
+    assert.equal(getMaxToolSteps(), 25);
+  });
 });
+
 

@@ -31,18 +31,19 @@
     }
   },
   "llmProvider": "ollama",
-  "ollamaHost": "https://remote-endpoint.local:4567",
-  "lmStudioHost": "http://192.168.1.9:12345",
+  "ollamaHost": "http://localhost:11434",
+  "lmStudioHost": "http://localhost:1234",
   "ollamaAuth": "",
   "lmStudioAuth": "",
   "provider": {
     "type": "ollama",
     "llmProvider": "ollama",
-    "ollamaHost": "https://remote-endpoint.local:4567",
-    "lmStudioHost": "http://192.168.1.9:12345",
+    "ollamaHost": "http://localhost:11434",
+    "lmStudioHost": "http://localhost:1234",
     "ollamaAuth": "",
     "lmStudioAuth": ""
   },
   "autoMinimize": false,
-  "executeThinking": false
+  "executeThinking": true,
+  "maxToolSteps": 25
 }

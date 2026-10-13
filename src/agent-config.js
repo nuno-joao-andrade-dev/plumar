@@ -39,7 +39,7 @@ function getSettingsPath() {
 }
 
 export function loadProviderSettings() {
-  if (process.argv.some(arg => arg.includes('test')) && !process.cwd().includes('temp')) {
+  if ((process.argv.some(arg => arg.includes('test')) || process.env.NODE_TEST_CONTEXT) && !process.cwd().includes('temp')) {
     return;
   }
   const settingsPath = getSettingsPath();
@@ -85,6 +85,13 @@ export function loadProviderSettings() {
         if (parsed.executeThinking !== undefined) {
           executeThinking = !!parsed.executeThinking;
         }
+        const rawMaxSteps = parsed.maxToolSteps ?? parsed.maxToolStepsPerTurn;
+        if (rawMaxSteps !== undefined) {
+          const parsedSteps = parseInt(rawMaxSteps, 10);
+          if (!isNaN(parsedSteps) && parsedSteps >= 1) {
+            maxToolSteps = parsedSteps;
+          }
+        }
       }
     } catch (err) {
       // ignore
@@ -93,7 +100,7 @@ export function loadProviderSettings() {
 }
 
 export function saveProviderSettings() {
-  if (process.argv.some(arg => arg.includes('test')) && !process.cwd().includes('temp')) {
+  if ((process.argv.some(arg => arg.includes('test')) || process.env.NODE_TEST_CONTEXT) && !process.cwd().includes('temp')) {
     return;
   }
   const settingsPath = getSettingsPath();
@@ -116,6 +123,7 @@ export function saveProviderSettings() {
   parsed.lmStudioAuth = lmStudioAuth;
   parsed.autoMinimize = autoMinimize;
   parsed.executeThinking = executeThinking;
+  parsed.maxToolSteps = maxToolSteps;
 
   if (!parsed.provider) {
     parsed.provider = {};
@@ -142,6 +150,7 @@ let ollamaAuth = '';
 let lmStudioAuth = '';
 let autoMinimize = false;
 let executeThinking = false;
+let maxToolSteps = 25;
 
 // Load saved settings from settings file
 loadProviderSettings();
@@ -170,6 +179,13 @@ if (process.env.EXECUTE_THINKING !== undefined) {
 } else if (process.env.PLUMAR_EXECUTE_THINKING !== undefined) {
   executeThinking = process.env.PLUMAR_EXECUTE_THINKING === 'true';
 }
+const envMaxSteps = process.env.MAX_TOOL_STEPS ?? process.env.PLUMAR_MAX_TOOL_STEPS;
+if (envMaxSteps !== undefined) {
+  const parsedEnvSteps = parseInt(envMaxSteps, 10);
+  if (!isNaN(parsedEnvSteps) && parsedEnvSteps >= 1) {
+    maxToolSteps = parsedEnvSteps;
+  }
+}
 
 // Keep process.env in sync
 process.env.LLM_PROVIDER = llmProvider;
@@ -179,6 +195,7 @@ process.env.OLLAMA_AUTH = ollamaAuth;
 process.env.LMSTUDIO_AUTH = lmStudioAuth;
 process.env.AUTO_MINIMIZE = String(autoMinimize);
 process.env.EXECUTE_THINKING = String(executeThinking);
+process.env.MAX_TOOL_STEPS = String(maxToolSteps);
 
 export function isAutoMinimizeEnabled() {
   return autoMinimize;
@@ -198,6 +215,25 @@ export function setExecuteThinkingEnabled(enabled) {
   executeThinking = !!enabled;
   process.env.EXECUTE_THINKING = String(executeThinking);
   saveProviderSettings();
+}
+
+export function getMaxToolSteps() {
+  const envVal = process.env.MAX_TOOL_STEPS ? parseInt(process.env.MAX_TOOL_STEPS, 10) : NaN;
+  if (!isNaN(envVal) && envVal >= 1) {
+    return envVal;
+  }
+  return maxToolSteps;
+}
+
+export function setMaxToolSteps(steps) {
+  const parsed = parseInt(steps, 10);
+  if (isNaN(parsed) || parsed < 1) {
+    return maxToolSteps;
+  }
+  maxToolSteps = Math.min(200, parsed);
+  process.env.MAX_TOOL_STEPS = String(maxToolSteps);
+  saveProviderSettings();
+  return maxToolSteps;
 }
 
 export function getLlmProvider() {
@@ -268,8 +304,9 @@ export function setLmStudioHost(url) {
 }
 
 // Resolve the active server base URL
-export function getOllamaBaseUrl() {
-  return getLlmProvider() === 'lmstudio' ? getLmStudioHost() : getOllamaHost();
+export function getOllamaBaseUrl(providerOverride = null) {
+  const activeProvider = providerOverride || getLlmProvider();
+  return activeProvider === 'lmstudio' ? getLmStudioHost() : getOllamaHost();
 }
 
 let onConfigChangeCallback = null;
@@ -314,9 +351,10 @@ export function setLmStudioAuth(auth) {
   triggerConfigChange();
 }
 
-export function getOllamaHeaders() {
+export function getOllamaHeaders(providerOverride = null) {
   const headers = { 'Content-Type': 'application/json' };
-  const auth = getLlmProvider() === 'lmstudio' ? getLmStudioAuth() : getOllamaAuth();
+  const activeProvider = providerOverride || getLlmProvider();
+  const auth = activeProvider === 'lmstudio' ? getLmStudioAuth() : getOllamaAuth();
   if (auth) {
     if (auth.includes(':')) {
       const index = auth.indexOf(':');
@@ -373,12 +411,12 @@ export async function getModelContextLength(modelName) {
   if (data && data.model_info) {
     for (const [key, val] of Object.entries(data.model_info)) {
       if (key.endsWith('.context_length') && typeof val === 'number') {
-        return val;
+        return Math.min(val, 32768);
       }
     }
     for (const [key, val] of Object.entries(data.model_info)) {
       if (key.includes('context_length') && typeof val === 'number') {
-        return val;
+        return Math.min(val, 32768);
       }
     }
   }

@@ -162,7 +162,7 @@ function stripTerminalResponses(chunk) {
   str = str.replace(/\b10;\b/g, '');
   str = str.replace(/\b11;\b/g, '');
   str = str.replace(/\b\d+;\d+R\b/gi, '');
-  str = str.replace(/\b\d+R\b/gi, '');
+  str = str.replace(/;\d+R\b/gi, '');
   str = str.replace(/[\x07]/g, '');
   
   if (isBuffer) {

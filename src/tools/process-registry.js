@@ -1,7 +1,8 @@
 import { spawn } from 'child_process';
+import { createWriteStream } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
-import { WORKSPACE_DIR } from './core-helper.js';
+import { WORKSPACE_DIR, getWorkspaceDir, resolveSafePath } from './core-helper.js';
 
 // Global in-memory registry of background processes
 const managedProcesses = new Map();
@@ -42,11 +43,12 @@ export async function startBackgroundProcess({ command, name, cwd, startupWaitMs
     throw new Error('Command must be a non-empty string.');
   }
 
-  const targetCwd = cwd ? path.resolve(WORKSPACE_DIR, cwd) : WORKSPACE_DIR;
+  const workspaceDir = getWorkspaceDir();
+  const targetCwd = cwd ? resolveSafePath(cwd) : workspaceDir;
   const id = `proc-${processCounter++}`;
   const label = name ? name.trim() : command.trim().split(/\s+/)[0];
 
-  const logDir = path.join(WORKSPACE_DIR, '.plumar', 'logs');
+  const logDir = path.join(workspaceDir, '.plumar', 'logs');
   try {
     await fs.mkdir(logDir, { recursive: true });
   } catch {}
@@ -54,6 +56,17 @@ export async function startBackgroundProcess({ command, name, cwd, startupWaitMs
   const logFilePath = path.join(logDir, `${id}.log`);
   const recentLogs = [];
   const maxRecentLogs = 300;
+
+  let logStream = null;
+  try {
+    logStream = createWriteStream(logFilePath, { flags: 'a' });
+    logStream.on('error', () => {});
+    if (typeof logStream.unref === 'function') {
+      logStream.unref();
+    }
+  } catch {
+    logStream = null;
+  }
 
   const appendLog = (chunk, type = 'stdout') => {
     const lines = chunk.toString().split(/\r?\n/);
@@ -65,8 +78,13 @@ export async function startBackgroundProcess({ command, name, cwd, startupWaitMs
         recentLogs.shift();
       }
     }
-    // Asynchronously append to disk log file
-    fs.appendFile(logFilePath, chunk).catch(() => {});
+    if (logStream && !logStream.destroyed && logStream.writable) {
+      try {
+        logStream.write(chunk);
+      } catch {}
+    } else {
+      fs.appendFile(logFilePath, chunk).catch(() => {});
+    }
   };
 
   const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/bash';
@@ -89,6 +107,7 @@ export async function startBackgroundProcess({ command, name, cwd, startupWaitMs
     status: 'running',
     exitCode: null,
     logFilePath,
+    logStream,
     recentLogs
   };
 
@@ -105,11 +124,18 @@ export async function startBackgroundProcess({ command, name, cwd, startupWaitMs
   child.on('exit', (code, signal) => {
     procEntry.exitCode = code;
     procEntry.status = code === 0 ? 'stopped' : 'failed';
-    appendLog(`Process exited with code ${code} (${signal || 'none'})`, 'stdout');
+    appendLog(`Process exited with code ${code} (${signal || 'none'})\n`, 'stdout');
+    if (logStream && !logStream.destroyed) {
+      try {
+        logStream.end();
+      } catch {}
+    }
   });
 
   if (child.unref && process.platform !== 'win32') {
     child.unref();
+    if (child.stdout && typeof child.stdout.unref === 'function') child.stdout.unref();
+    if (child.stderr && typeof child.stderr.unref === 'function') child.stderr.unref();
   }
 
   // Observation window: wait up to startupWaitMs (default ~10 seconds)
@@ -492,6 +518,11 @@ export async function stopBackgroundProcess({ processId, name, pid, signal = 'SI
   }
 
   proc.status = 'stopped';
+  if (proc.logStream && !proc.logStream.destroyed) {
+    try {
+      proc.logStream.end();
+    } catch {}
+  }
   return {
     success: true,
     processId: proc.id,

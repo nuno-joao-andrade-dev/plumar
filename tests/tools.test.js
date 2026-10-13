@@ -4,10 +4,23 @@ import fs from 'fs/promises';
 import path from 'path';
 import { tools } from '../src/tools.js';
 import { Jimp } from 'jimp';
-import { wrapFunctionTool, resetTurnToolHistory } from '../src/policy-manager.js';
-import { detectAndParseTextToolCalls, extractThinkingProcessToolCalls, hasActionableThinkingPlan, adkContentsToOllamaMessages } from '../src/ollama-client.js';
+import { wrapFunctionTool, resetTurnToolHistory, setToolPolicy } from '../src/policy-manager.js';
+import {
+  detectAndParseTextToolCalls,
+  extractThinkingProcessToolCalls,
+  hasActionableThinkingPlan,
+  adkContentsToOllamaMessages,
+  stripRedundantToolSchemasFromPrompt,
+  readStreamingResponse,
+  compactMessagesForContextHeadroom,
+  Ollama
+} from '../src/ollama-client.js';
 import { refeedThinkingProcess } from '../src/agent.js';
 import { isExecuteThinkingEnabled, setExecuteThinkingEnabled } from '../src/agent-config.js';
+import { resolveSafePath } from '../src/tools/core-helper.js';
+import { stripTerminalQueryGarbage } from '../src/terminal-io.js';
+import { createCliCompleter } from '../src/completer.js';
+import { handleMcpRequest } from '../src/mcp.js';
 
 test('1. calculator tool', async (t) => {
   await t.test('should evaluate simple math expression', async () => {
@@ -329,6 +342,16 @@ test('11. Robust Parameter Fallbacks and Safe Path Hardening', async (t) => {
     const res2 = await tools.writeFile.execute({ path: 12345, content: 'test' });
     assert.deepStrictEqual(res2.success, false);
     assert.match(res2.error, /Access denied: Provided path must be a non-empty string/i);
+  });
+
+  await t.test('resolveSafePath strictly restricts access to current directory only', async () => {
+    const res1 = await tools.readFile.execute({ filePath: '../outside.txt' });
+    assert.deepStrictEqual(res1.success, false);
+    assert.match(res1.error, /outside workspace directory/i);
+
+    const res2 = await tools.writeFile.execute({ filePath: '/etc/passwd', content: 'hacked' });
+    assert.deepStrictEqual(res2.success, false);
+    assert.match(res2.error, /outside workspace directory/i);
   });
 });
 
@@ -1205,6 +1228,10 @@ test('19. Binary Writing and 3D Mesh Generation Tools', async (t) => {
 
   await t.test('generate3DModel: should procedurally fallback and generate a 3D OBJ file and save it', async () => {
     const tempObjFile = 'temp_3d_cube.obj';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error('Offline procedural fallback test');
+    };
     try {
       const res = await tools.generate3DModel.execute({
         prompt: 'a low-poly cube',
@@ -1218,6 +1245,7 @@ test('19. Binary Writing and 3D Mesh Generation Tools', async (t) => {
       assert.match(content, /^v\s+[-0-9\.]+/m);
       assert.match(content, /^f\s+\d+/m);
     } finally {
+      globalThis.fetch = originalFetch;
       try {
         await fs.unlink(tempObjFile);
       } catch {}
@@ -1236,12 +1264,18 @@ test('20. Loop and Duplicate Execution Safeguards', async (t) => {
       const res1 = await wrappedWriteFile.execute({ filePath: testFile, content: 'hello loop' });
       assert.strictEqual(res1.success, true);
       assert.strictEqual(res1.cached, undefined);
+      assert.strictEqual(await fs.readFile(testFile, 'utf-8'), 'hello loop');
 
-      // Second identical invocation should be caught by duplicate detector
+      // Alter file content behind the scenes
+      await fs.writeFile(testFile, 'external modification', 'utf-8');
+      assert.strictEqual(await fs.readFile(testFile, 'utf-8'), 'external modification');
+
+      // Second identical invocation should be caught by duplicate detector, but STILL ensure file on disk is updated
       const res2 = await wrappedWriteFile.execute({ filePath: testFile, content: 'hello loop' });
       assert.strictEqual(res2.success, true);
       assert.strictEqual(res2.cached, true);
       assert.match(res2.message, /already completed successfully/i);
+      assert.strictEqual(await fs.readFile(testFile, 'utf-8'), 'hello loop');
 
       // Third identical invocation should trigger loop detection and block
       const res3 = await wrappedWriteFile.execute({ filePath: testFile, content: 'hello loop' });
@@ -1253,6 +1287,17 @@ test('20. Loop and Duplicate Execution Safeguards', async (t) => {
         await fs.unlink(testFile);
       } catch {}
       resetTurnToolHistory();
+    }
+  });
+
+  await t.test('writeFile: should support TargetFile and CodeContent aliases and update disk', async () => {
+    const aliasFile = 'temp_alias_test.txt';
+    try {
+      const res = await tools.writeFile.execute({ TargetFile: aliasFile, CodeContent: 'alias content works' });
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(await fs.readFile(aliasFile, 'utf-8'), 'alias content works');
+    } finally {
+      try { await fs.unlink(aliasFile); } catch {}
     }
   });
 
@@ -1545,7 +1590,379 @@ This is the standard procedure for running full-stack applications.`;
   });
 });
 
+test('22. Security, Streaming, Completer, and MCP Enhancements', async (t) => {
+  await t.test('resolveSafePath: should block active and dangling symlink escapes outside workspace', async () => {
+    const activeLink = 'temp_escape_active_link';
+    const danglingLink = 'temp_escape_dangling_link';
+    try {
+      await fs.symlink('/etc/hosts', activeLink);
+      assert.throws(
+        () => resolveSafePath(activeLink),
+        /Access denied/i
+      );
 
+      await fs.symlink('/tmp/non_existent_outside_target_plumar_test_999', danglingLink);
+      assert.throws(
+        () => resolveSafePath(danglingLink),
+        /Access denied/i
+      );
+    } finally {
+      try { await fs.unlink(activeLink); } catch {}
+      try { await fs.unlink(danglingLink); } catch {}
+    }
+  });
+
+  await t.test('portManager: should reject invalid port numbers and protected PIDs', async () => {
+    const badPortRes = await tools.portManager.execute({ action: 'list', port: 70000 });
+    assert.strictEqual(badPortRes.success, false);
+    assert.match(badPortRes.error, /Invalid port number/i);
+
+    const pid1Res = await tools.portManager.execute({ action: 'kill', pid: 1 });
+    assert.strictEqual(pid1Res.success, false);
+    assert.match(pid1Res.error, /Refusing to target system or non-positive PIDs/i);
+
+    const selfPidRes = await tools.portManager.execute({ action: 'kill', pid: process.pid });
+    assert.strictEqual(selfPidRes.success, false);
+    assert.match(selfPidRes.error, /Refusing to terminate the active plumar-cli process/i);
+  });
+
+  await t.test('adkContentsToOllamaMessages: should assign distinct FIFO tool_call_ids for multiple calls to same tool', () => {
+    const contents = [
+      {
+        role: 'user',
+        parts: [{ text: 'Read a.txt and b.txt' }]
+      },
+      {
+        role: 'model',
+        parts: [
+          { functionCall: { name: 'readFile', args: { filePath: 'a.txt' } } },
+          { functionCall: { name: 'readFile', args: { filePath: 'b.txt' } } }
+        ]
+      },
+      {
+        role: 'user',
+        parts: [
+          { functionResponse: { name: 'readFile', response: { content: 'content A' } } },
+          { functionResponse: { name: 'readFile', response: { content: 'content B' } } }
+        ]
+      }
+    ];
+
+    const messages = adkContentsToOllamaMessages(contents);
+    const assistantMsg = messages.find(m => m.role === 'assistant');
+    const toolMsgs = messages.filter(m => m.role === 'tool');
+
+    assert.strictEqual(assistantMsg.tool_calls.length, 2);
+    assert.strictEqual(toolMsgs.length, 2);
+    assert.notStrictEqual(assistantMsg.tool_calls[0].id, assistantMsg.tool_calls[1].id);
+    assert.strictEqual(toolMsgs[0].tool_call_id, assistantMsg.tool_calls[0].id);
+    assert.strictEqual(toolMsgs[1].tool_call_id, assistantMsg.tool_calls[1].id);
+  });
+
+  await t.test('stripRedundantToolSchemasFromPrompt: should strip verbose JSON schema table while keeping tool usage rules', () => {
+    const samplePrompt = `You are a helpful coding assistant.\n### Available Tools & Parameter Schemas\n- **readFile**: Reads a file.\n\n### Tool Usage Rules & Constraints\nAlways use workspace relative paths.`;
+    const stripped = stripRedundantToolSchemasFromPrompt(samplePrompt);
+    assert.ok(!stripped.includes('### Available Tools & Parameter Schemas'));
+    assert.ok(stripped.includes('You are a helpful coding assistant.'));
+    assert.ok(stripped.includes('### Tool Usage Rules & Constraints'));
+    assert.ok(stripped.includes('Always use workspace relative paths.'));
+  });
+
+  await t.test('readStreamingResponse: should parse Ollama NDJSON and LM Studio SSE streams and invoke onToken', async () => {
+    const encoder = new TextEncoder();
+    const ollamaLines = [
+      JSON.stringify({ message: { role: 'assistant', content: 'Hello ' }, done: false }) + '\n',
+      JSON.stringify({ message: { role: 'assistant', content: 'world!' }, done: true, eval_count: 5 }) + '\n'
+    ];
+    const ollamaStream = new ReadableStream({
+      start(controller) {
+        for (const l of ollamaLines) controller.enqueue(encoder.encode(l));
+        controller.close();
+      }
+    });
+
+    const tokens = [];
+    const ollamaData = await readStreamingResponse(ollamaStream, 'ollama', (tok) => tokens.push(tok));
+    assert.strictEqual(ollamaData.message.content, 'Hello world!');
+    assert.deepStrictEqual(tokens, ['Hello ', 'world!']);
+
+    const sseLines = [
+      'data: ' + JSON.stringify({ choices: [{ delta: { content: 'Stream ' } }] }) + '\n\n',
+      'data: ' + JSON.stringify({ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }) + '\n\n',
+      'data: [DONE]\n\n'
+    ];
+    const sseStream = new ReadableStream({
+      start(controller) {
+        for (const l of sseLines) controller.enqueue(encoder.encode(l));
+        controller.close();
+      }
+    });
+
+    const sseTokens = [];
+    const sseData = await readStreamingResponse(sseStream, 'lmstudio', (tok) => sseTokens.push(tok));
+    assert.strictEqual(sseData.choices[0].message.content, 'Stream ok');
+    assert.deepStrictEqual(sseTokens, ['Stream ', 'ok']);
+  });
+
+  await t.test('stripTerminalQueryGarbage: should strip ANSI cursor/OSC responses without corrupting legitimate tokens like 32R', () => {
+    const dirty = '\x1b[40;1R]11;rgb:ffff/ffff/ffff\x07Model 32R and 100R resistor;12R';
+    const cleaned = stripTerminalQueryGarbage(dirty);
+    assert.strictEqual(cleaned, 'Model 32R and 100R resistor');
+  });
+
+  await t.test('createCliCompleter: should complete slash commands, policy arguments, and @files', () => {
+    const completer = createCliCompleter({
+      getToolNames: () => ['readFile', 'writeFile', 'executeCommand']
+    });
+
+    const [slashHits] = completer('/he');
+    assert.ok(slashHits.includes('/help'));
+
+    const [policyToolHits, policyToolPartial] = completer('/policy read');
+    assert.ok(policyToolHits.includes('readFile'));
+    assert.strictEqual(policyToolPartial, 'read');
+
+    const [policyLevelHits, policyLevelPartial] = completer('/policy readFile d');
+    assert.ok(policyLevelHits.includes('deny'));
+    assert.strictEqual(policyLevelPartial, 'd');
+
+    const [fileHits] = completer('Check @package.');
+    assert.ok(fileHits.includes('@package.json'));
+  });
+
+  await t.test('handleMcpRequest: should block tools denied by policy', async () => {
+    setToolPolicy('calculator', 'deny');
+    try {
+      const response = await handleMcpRequest({
+        jsonrpc: '2.0',
+        id: 42,
+        method: 'tools/call',
+        params: {
+          name: 'calculator',
+          arguments: { expression: '1 + 1' }
+        }
+      });
+      assert.strictEqual(response.id, 42);
+      assert.strictEqual(response.result.isError, true);
+      assert.match(response.result.content[0].text, /Tool execution denied.*policy blocks/i);
+    } finally {
+      setToolPolicy('calculator', 'reset');
+    }
+  });
+
+  await t.test('compactMessagesForContextHeadroom: should compact older tool outputs and large tool_calls while preserving system, first user, and recent messages', () => {
+    const messages = [
+      { role: 'system', content: 'System prompt' },
+      { role: 'user', content: 'Create a restaurant reservation app' },
+      {
+        role: 'assistant',
+        content: '<thinking>' + 'x'.repeat(2000) + '</thinking>Creating backend...',
+        tool_calls: [{
+          id: 'call_1',
+          type: 'function',
+          function: {
+            name: 'writeFile',
+            arguments: { filePath: 'server.js', content: 'const express = require("express");\n' + '// code\n'.repeat(500) }
+          }
+        }]
+      },
+      { role: 'tool', name: 'writeFile', content: JSON.stringify({ success: true, output: 'y'.repeat(3000) }) },
+      { role: 'assistant', content: 'Step 2', tool_calls: [{ id: 'c2', type: 'function', function: { name: 'executeCommand', arguments: { command: 'npm i' } } }] },
+      { role: 'tool', name: 'executeCommand', content: 'z'.repeat(3000) },
+      { role: 'assistant', content: 'Recent step 1' },
+      { role: 'tool', name: 'executeCommand', content: 'Recent output 1' },
+      { role: 'assistant', content: 'Recent step 2' },
+      { role: 'tool', name: 'executeCommand', content: 'Recent output 2' },
+      { role: 'assistant', content: 'Recent step 3' },
+      { role: 'tool', name: 'executeCommand', content: 'Recent output 3' }
+    ];
+
+    const compacted = compactMessagesForContextHeadroom(messages, 8192, null, 7500, true);
+    assert.strictEqual(compacted[0].role, 'system');
+    assert.strictEqual(compacted[1].content, 'Create a restaurant reservation app');
+    assert.strictEqual(compacted[compacted.length - 1].content, 'Recent output 3');
+    assert.ok(JSON.stringify(compacted).length < JSON.stringify(messages).length);
+  });
+
+  await t.test('Ollama.generateContentAsync: should automatically continue when response is truncated mid-sentence (done_reason: "length")', async () => {
+    const prevFetch = globalThis.fetch;
+    let chatCallCount = 0;
+
+    globalThis.fetch = async (url) => {
+      if (String(url).endsWith('/api/show')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            parameters: 'temperature 0.7',
+            model_info: { 'gemma4.context_length': 32768 }
+          })
+        };
+      }
+      chatCallCount++;
+      if (chatCallCount === 1) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Map([['content-type', 'application/json']]),
+          json: async () => ({
+            message: {
+              role: 'assistant',
+              content: "This means my previous codeFixer operation was flawed because it caused a conflict in the module scope. The original "
+            },
+            done_reason: 'length',
+            prompt_eval_count: 32678,
+            eval_count: 90
+          })
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ({
+          message: {
+            role: 'assistant',
+            content: 'declaration was already at the top of server.js, so I will remove the duplicate declaration now.',
+            tool_calls: [{
+              id: 'call_fix_1',
+              type: 'function',
+              function: {
+                name: 'codeFixer',
+                arguments: { filePath: 'server.js', operations: [] }
+              }
+            }]
+          },
+          done_reason: 'stop',
+          prompt_eval_count: 18000,
+          eval_count: 45
+        })
+      };
+    };
+
+    try {
+      const llm = new Ollama({ model: 'gemma4:e4b', sessionId: 'test-length-continuation' });
+      const outputs = [];
+      for await (const chunk of llm.generateContentAsync({
+        contents: [{ role: 'user', parts: [{ text: 'fix the server error' }] }],
+        config: { systemInstruction: 'You are a coder.' }
+      })) {
+        outputs.push(chunk);
+      }
+
+      assert.strictEqual(chatCallCount, 2, 'Should automatically issue a continuation request when done_reason is length');
+      assert.strictEqual(outputs.length, 1);
+      const parts = outputs[0].content.parts;
+      const textPart = parts.find(p => p.text && !p.thought);
+      const fnCallPart = parts.find(p => p.functionCall);
+      assert.ok(textPart.text.includes('The original declaration was already at the top of server.js'));
+      assert.ok(fnCallPart, 'Should preserve tool_calls emitted in the continuation response');
+      assert.strictEqual(fnCallPart.functionCall.name, 'codeFixer');
+    } finally {
+      globalThis.fetch = prevFetch;
+    }
+  });
+
+  await t.test('detectAndParseTextToolCalls & Ollama: should parse Gemma 4 <|tool_call>call:tool{key:<|"|>val<|"|>}<tool_call|><|tool_response> in text or thinking', async () => {
+    const rawGemmaToolCall = `<|tool_call>call:restClient{method:<|"|>GET<|"|>,url:<|"|>http://localhost:3000/api/reservations<|"|>}<tool_call|><|tool_response>`;
+    const parsedDirect = detectAndParseTextToolCalls(rawGemmaToolCall);
+    assert.strictEqual(parsedDirect.calls.length, 1);
+    assert.strictEqual(parsedDirect.calls[0].name, 'restClient');
+    assert.deepStrictEqual(parsedDirect.calls[0].args, {
+      method: 'GET',
+      url: 'http://localhost:3000/api/reservations'
+    });
+    assert.strictEqual(parsedDirect.text, '');
+
+    // Test multi-line code with inner quotes and object literals inside <|"|>...<|"|>
+    const rawWriteCall = `<|tool_call>call:writeFile{content:<|"|>const cors = require("cors");\nconst cfg = { port: 3000 };\n<|"|>,filePath:<|"|>backend/server.js<|"|>}<tool_call|><|tool_response>`;
+    const parsedWrite = detectAndParseTextToolCalls(rawWriteCall);
+    assert.strictEqual(parsedWrite.calls.length, 1);
+    assert.strictEqual(parsedWrite.calls[0].name, 'writeFile');
+    assert.deepStrictEqual(parsedWrite.calls[0].args, {
+      content: 'const cors = require("cors");\nconst cfg = { port: 3000 };\n',
+      filePath: 'backend/server.js'
+    });
+
+    // Test end-to-end when </thinking> and <|tool_call> leak into message.thinking and message.content is empty:
+    // Should execute ONLY when executeThinking setting is enabled (and NOT when disabled)
+    const prevFetch = globalThis.fetch;
+    const prevExecThinking = isExecuteThinkingEnabled();
+    globalThis.fetch = async (url) => {
+      if (String(url).endsWith('/api/show')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            parameters: 'temperature 0.7',
+            model_info: { 'gemma4.context_length': 32768 }
+          })
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ({
+          message: {
+            role: 'assistant',
+            content: '',
+            thinking: `The user wants me to test the proxy functionality by making a request to \`/api/reservations\`.\nThe best way to test the *proxy* itself is to use the \`restClient\` tool against the expected public-facing URL (\`http://localhost:3000/api/reservations\`).\nI will perform a GET request first, as it's the simplest test for connectivity.\n</thinking>\n<|tool_call>call:restClient{method:<|"|>GET<|"|>,url:<|"|>http://localhost:3000/api/reservations<|"|>}<tool_call|><|tool_response>`
+          },
+          done_reason: 'stop',
+          prompt_eval_count: 1200,
+          eval_count: 85
+        })
+      };
+    };
+
+    try {
+      // 1. When executeThinking is ON in settings: should execute the tool call from Thinking Process
+      setExecuteThinkingEnabled(true);
+      const llmOn = new Ollama({ model: 'gemma4:e4b', sessionId: 'test-gemma4-leaked-tool-call-on' });
+      const outputsOn = [];
+      for await (const chunk of llmOn.generateContentAsync({
+        contents: [{ role: 'user', parts: [{ text: 'test the proxy' }] }],
+        config: { systemInstruction: 'You are a coder.' }
+      })) {
+        outputsOn.push(chunk);
+      }
+
+      assert.strictEqual(outputsOn.length, 1);
+      const partsOn = outputsOn[0].content.parts;
+      const thoughtPartOn = partsOn.find(p => p.thought);
+      const fnCallPartOn = partsOn.find(p => p.functionCall);
+
+      assert.ok(thoughtPartOn, 'Should preserve clean thought part when executeThinking is ON');
+      assert.ok(!thoughtPartOn.text.includes('</thinking>'), 'Thought part should not contain </thinking>');
+      assert.ok(!thoughtPartOn.text.includes('<|tool_call>'), 'Thought part should not contain raw <|tool_call>');
+      assert.ok(fnCallPartOn, 'Should extract functionCall from Thinking Process when executeThinking is ON');
+      assert.strictEqual(fnCallPartOn.functionCall.name, 'restClient');
+      assert.deepStrictEqual(fnCallPartOn.functionCall.args, {
+        method: 'GET',
+        url: 'http://localhost:3000/api/reservations'
+      });
+
+      // 2. When executeThinking is OFF in settings: should NOT execute the tool call from Thinking Process
+      setExecuteThinkingEnabled(false);
+      const llmOff = new Ollama({ model: 'gemma4:e4b', sessionId: 'test-gemma4-leaked-tool-call-off' });
+      const outputsOff = [];
+      for await (const chunk of llmOff.generateContentAsync({
+        contents: [{ role: 'user', parts: [{ text: 'test the proxy' }] }],
+        config: { systemInstruction: 'You are a coder.' }
+      })) {
+        outputsOff.push(chunk);
+      }
+
+      const partsOff = outputsOff[0].content.parts;
+      const fnCallPartOff = partsOff.find(p => p.functionCall);
+      assert.strictEqual(fnCallPartOff, undefined, 'Should NOT execute Thinking Process tool call when executeThinking is OFF');
+    } finally {
+      setExecuteThinkingEnabled(prevExecThinking);
+      globalThis.fetch = prevFetch;
+    }
+  });
+});
 
 
 

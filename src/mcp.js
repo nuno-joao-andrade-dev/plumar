@@ -1,5 +1,6 @@
 import readline from 'readline';
 import { tools as rawTools } from './tools.js';
+import { getToolPolicy } from './policy-manager.js';
 
 /**
  * Starts the Model Context Protocol (MCP) server listening on stdin/stdout
@@ -34,13 +35,13 @@ export function runMcpServer() {
     }
   });
 
-  process.stderr.write('🚀 Gemma CLI Agent MCP Server started on stdio\n');
+  process.stderr.write('🚀 plumar-cli MCP Server started on stdio\n');
 }
 
 /**
  * Handles incoming JSON-RPC requests for the Model Context Protocol
  */
-async function handleMcpRequest(request) {
+export async function handleMcpRequest(request) {
   const { jsonrpc, id, method, params } = request;
 
   // Notifications (no id) are safely ignored or logged
@@ -106,6 +107,18 @@ async function handleMcpRequest(request) {
             jsonrpc: '2.0',
             id,
             error: { code: -32601, message: `Method not found: tool "${name}" does not exist` }
+          };
+        }
+
+        const policy = getToolPolicy(name);
+        if (policy === 'deny') {
+          return {
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: `Tool execution denied: User policy blocks "${name}"` }],
+              isError: true,
+            }
           };
         }
 

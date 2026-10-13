@@ -27,7 +27,9 @@ import {
   isAutoMinimizeEnabled,
   setAutoMinimizeEnabled,
   isExecuteThinkingEnabled,
-  setExecuteThinkingEnabled
+  setExecuteThinkingEnabled,
+  getMaxToolSteps,
+  setMaxToolSteps
 } from './agent-config.js';
 
 import {
@@ -92,6 +94,8 @@ export {
   setAutoMinimizeEnabled,
   isExecuteThinkingEnabled,
   setExecuteThinkingEnabled,
+  getMaxToolSteps,
+  setMaxToolSteps,
   tools,
   registerMcpTools,
   setReadlineInterface,
@@ -197,7 +201,7 @@ export async function runAgentTurn(sessionId, userMessage, modelName, modeKey = 
   const terminalCapabilityHeader = `### CORE CAPABILITIES & PERMISSIONS: LOCAL TERMINAL & FULL WORKSPACE ACCESS
 You are running directly inside the user's local terminal environment on their machine (OS: ${process.platform}).
 1. **TERMINAL EXECUTION**: You HAVE full permission and direct capability to execute shell and terminal commands on the user's machine using the \`executeCommand\` tool! You CAN run application setup, start servers, run builds, execute tests, install packages, and start long-running background processes directly.
-2. **UNRESTRICTED WORKSPACE & FILE SYSTEM ACCESS**: You have unrestricted access to inspect, search, read, list directories, create, and modify ANY file in the workspace and user project directories (including source files, entry points, configuration files, and package manifests) using \`findFiles\`, \`listFiles\`, \`searchGrep\`, \`readFile\`, \`writeFile\`, \`codeFixer\`, and \`searchReplace\`. You are NOT restricted to a specific list of files!
+2. **CURRENT WORKSPACE FOLDER ACCESS**: You have full permission and access to inspect, search, read, list directories, create, and modify files in the current workspace folder ("${process.cwd()}") using \`findFiles\`, \`listFiles\`, \`searchGrep\`, \`readFile\`, \`writeFile\`, \`codeFixer\`, and \`searchReplace\`. All file operations must be strictly confined to this current folder. Never attempt to traverse outside or operate above this directory!
 
 CRITICAL DIRECTIVES:
 - NEVER state: "I am an AI agent operating within a sandboxed environment." You are NOT in a restricted sandbox!
@@ -302,7 +306,7 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
 
   // Append current active working directory (cwd) context so that the model knows where it is running
   const currentDirectory = process.cwd();
-  systemPrompt += `\n\n### Current Workspace Directory Context\nYour current working directory/folder is: "${currentDirectory}". Unless the user specifies an absolute path or a different target directory, all files generated, updated, or created should be written relative to this directory. Always pass relative paths (e.g. "model.obj" or "./model.obj") to filesystem and media tools to save them in this directory.`;
+  systemPrompt += `\n\n### Current Workspace Directory Context\nYour current working directory/folder is: "${currentDirectory}". All files generated, updated, or created MUST be written inside this directory. Always operate strictly inside this current directory and pass relative paths (e.g. "model.obj" or "./model.obj") to filesystem and media tools. Never access or modify files outside this directory.`;
 
   // Append standard tools reference for text-fallback
   systemPrompt += '\n\n' + formatToolsForPrompt(tools);
@@ -355,7 +359,9 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
   let finalResponseText = '';
   const steps = [];
   let toolStepCount = 0;
-  const MAX_TOOL_STEPS_PER_TURN = 15;
+  let lastModelThoughtText = '';
+  let lastModelHadFunctionCall = false;
+  const MAX_TOOL_STEPS_PER_TURN = getMaxToolSteps();
 
   try {
     // 5. Run the conversational turn, collecting thought and content events
@@ -376,6 +382,9 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
       if (event.content && Array.isArray(event.content.parts)) {
         const thoughtParts = [];
         let textVal = '';
+        const hasFnCallInEvent =
+          getFunctionCalls(event).length > 0 ||
+          event.content.parts.some(p => p.functionCall);
         
         for (const part of event.content.parts) {
           if (part.thought) {
@@ -392,6 +401,11 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
               parts: thoughtParts
             }
           });
+        }
+
+        if (thoughtParts.length > 0 || hasFnCallInEvent || textVal.trim()) {
+          lastModelThoughtText = thoughtParts.map(p => p.text || '').join('\n').trim();
+          lastModelHadFunctionCall = hasFnCallInEvent;
         }
         
         if (textVal && textVal.trim()) {
@@ -410,6 +424,10 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
         }
         break;
       }
+    }
+
+    if (!finalResponseText.trim() && steps.length === 0 && toolStepCount === 0 && llm.lastError) {
+      throw llm.lastError;
     }
   } catch (err) {
     if (abortSignal && abortSignal.aborted) {
@@ -435,17 +453,19 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
   thinkingText = thinkingText.trim();
 
   // Refeed the thinking process to the model to execute the plan:
-  // When executeThinking is enabled (or when the model hallucinated execution without calling tools),
-  // and no tools were executed yet in this turn, re-feed the thinking process plan to the model
-  // so the model directly invokes the tools and executes the plan.
+  // When executeThinking is enabled in settings (or when the model hallucinated execution without calling tools),
+  // and the model's final step had an unexecuted thinking process plan, re-feed the thinking process plan
+  // to the model so the model directly invokes the tools and executes the plan.
   const isExecutionHallucination = /(?:i have executed|i've executed|status:\s*the process.*is running|started the (?:server|backend|frontend)|has been (?:started|executed) in the background)/i.test(finalResponseText);
-  const shouldAutoRefeed = toolStepCount === 0 &&
+  const activeThoughtPlan = lastModelThoughtText || (toolStepCount === 0 ? thinkingText : '');
+  const shouldAutoRefeed = !lastModelHadFunctionCall &&
+                           toolStepCount < MAX_TOOL_STEPS_PER_TURN &&
                            (isExecuteThinkingEnabled() || isExecutionHallucination) &&
-                           hasActionableThinkingPlan(thinkingText, finalResponseText);
+                           hasActionableThinkingPlan(activeThoughtPlan, finalResponseText);
 
   if (shouldAutoRefeed && (!abortSignal || !abortSignal.aborted)) {
     console.log(pc.cyan('\n⚡ Refeeding thinking process plan to the model to execute the plan...'));
-    const refeedPrompt = `You formulated the following plan and execution steps in your thinking process, but no tools have been executed yet:\n\n<thinking_process_plan>\n${thinkingText}\n</thinking_process_plan>\n\nExecute this plan NOW step-by-step using the available tools (e.g. executeCommand, writeFile, makeDirectory, codeFixer, searchReplace). You MUST call the tools directly to perform the planned actions. Do not just describe them—execute them now.`;
+    const refeedPrompt = `You formulated the following plan and execution steps in your thinking process, but did not execute the tool calls for it:\n\n<thinking_process_plan>\n${activeThoughtPlan}\n</thinking_process_plan>\n\nExecute this plan NOW step-by-step using the available tools (e.g. executeCommand, restClient, writeFile, makeDirectory, codeFixer, searchReplace, readFile). You MUST call the tools directly to perform the planned actions. Do not just describe them—execute them now.`;
 
     try {
       let refeedResponseText = '';

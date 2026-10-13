@@ -2,7 +2,7 @@ import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 import fs from 'fs/promises';
 import path from 'path';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { resolveSafePath, WORKSPACE_DIR, setLastWorkspaceFile, getLastWorkspaceFile } from './core-helper.js';
 import {
   startBackgroundProcess,
@@ -60,12 +60,28 @@ export const developmentTools = {
     }),
     execute: async ({ action, port, pid }) => {
       try {
+        if (port !== undefined) {
+          const portNum = Number(port);
+          if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+            throw new Error('Invalid port number. Port must be an integer between 1 and 65535.');
+          }
+        }
+        if (pid !== undefined) {
+          const pidNum = Number(pid);
+          if (!Number.isInteger(pidNum) || pidNum <= 1) {
+            throw new Error('Invalid PID. Refusing to target system or non-positive PIDs.');
+          }
+          if (pidNum === process.pid) {
+            throw new Error('Refusing to terminate the active plumar-cli process.');
+          }
+        }
+
         if (action === 'list') {
           if (!port) {
             throw new Error('Port is required for "list" action.');
           }
           return new Promise((resolve) => {
-            exec(`lsof -i :${port} -F pcu`, (err, stdout) => {
+            execFile('lsof', ['-i', `:${Number(port)}`, '-F', 'pcu'], (err, stdout) => {
               if (err || !stdout) {
                 return resolve({
                   success: true,
@@ -79,7 +95,7 @@ export const developmentTools = {
               for (const line of lines) {
                 if (line.startsWith('p')) {
                   if (currentProc.pid) processes.push(currentProc);
-                  currentProc = { pid: parseInt(line.slice(1)) };
+                  currentProc = { pid: parseInt(line.slice(1), 10) };
                 } else if (line.startsWith('c')) {
                   currentProc.command = line.slice(1);
                 } else if (line.startsWith('u')) {
@@ -95,12 +111,12 @@ export const developmentTools = {
             });
           });
         } else {
-          let targetPid = pid;
+          let targetPid = pid ? Number(pid) : undefined;
           if (!targetPid && port) {
             const pids = await new Promise((resolve) => {
-              exec(`lsof -t -i :${port}`, (err, stdout) => {
+              execFile('lsof', ['-t', '-i', `:${Number(port)}`], (err, stdout) => {
                 if (err || !stdout) return resolve([]);
-                resolve(stdout.trim().split('\n').map(p => parseInt(p)).filter(Boolean));
+                resolve(stdout.trim().split('\n').map(p => parseInt(p, 10)).filter(Boolean));
               });
             });
             if (pids.length === 0) {
@@ -111,6 +127,9 @@ export const developmentTools = {
 
           if (!targetPid) {
             throw new Error('Either port or pid must be specified to kill a process.');
+          }
+          if (targetPid <= 1 || targetPid === process.pid) {
+            throw new Error(`Refusing to kill protected PID ${targetPid}.`);
           }
 
           process.kill(targetPid, 'SIGKILL');
@@ -187,120 +206,123 @@ export const developmentTools = {
       try {
         const resolvedPath = resolveSafePath(filePath);
         const ext = path.extname(resolvedPath).toLowerCase();
+        const fRef = process.platform === 'win32' ? '"%PLUMAR_TARGET_FILE%"' : '"$PLUMAR_TARGET_FILE"';
         let cmd = '';
 
         if (action === 'format') {
           if (['.js', '.jsx', '.ts', '.tsx', '.json', '.html', '.css', '.scss', '.sass', '.less', '.yaml', '.yml', '.md'].includes(ext)) {
-            cmd = `npx prettier --write "${resolvedPath}"`;
+            cmd = `npx prettier --write ${fRef}`;
           } else if (['.py'].includes(ext)) {
-            cmd = `black "${resolvedPath}" || autopep8 --in-place "${resolvedPath}" || python3 -m black "${resolvedPath}"`;
+            cmd = `black ${fRef} || autopep8 --in-place ${fRef} || python3 -m black ${fRef}`;
           } else if (['.go'].includes(ext)) {
-            cmd = `gofmt -w "${resolvedPath}"`;
+            cmd = `gofmt -w ${fRef}`;
           } else if (['.rs'].includes(ext)) {
-            cmd = `rustfmt "${resolvedPath}"`;
+            cmd = `rustfmt ${fRef}`;
           } else if (['.cpp', '.hpp', '.cc', '.cxx', '.h', '.c', '.m', '.mm'].includes(ext)) {
-            cmd = `clang-format -i "${resolvedPath}"`;
+            cmd = `clang-format -i ${fRef}`;
           } else if (['.java'].includes(ext)) {
-            cmd = `google-java-format -i "${resolvedPath}" || clang-format -i "${resolvedPath}"`;
+            cmd = `google-java-format -i ${fRef} || clang-format -i ${fRef}`;
           } else if (['.cs'].includes(ext)) {
-            cmd = `dotnet-format "${resolvedPath}" || clang-format -i "${resolvedPath}"`;
+            cmd = `dotnet-format ${fRef} || clang-format -i ${fRef}`;
           } else if (['.rb'].includes(ext)) {
-            cmd = `rubocop -a "${resolvedPath}"`;
+            cmd = `rubocop -a ${fRef}`;
           } else if (['.php'].includes(ext)) {
-            cmd = `php-cs-fixer fix "${resolvedPath}" || phpcbf "${resolvedPath}"`;
+            cmd = `php-cs-fixer fix ${fRef} || phpcbf ${fRef}`;
           } else if (['.swift'].includes(ext)) {
-            cmd = `swiftformat "${resolvedPath}" || swift-format -i "${resolvedPath}"`;
+            cmd = `swiftformat ${fRef} || swift-format -i ${fRef}`;
           } else if (['.kt', '.kts'].includes(ext)) {
-            cmd = `ktlint -F "${resolvedPath}"`;
+            cmd = `ktlint -F ${fRef}`;
           } else if (['.dart'].includes(ext)) {
-            cmd = `dart format "${resolvedPath}"`;
+            cmd = `dart format ${fRef}`;
           } else if (['.sh', '.bash', '.zsh'].includes(ext)) {
-            cmd = `shfmt -w "${resolvedPath}"`;
+            cmd = `shfmt -w ${fRef}`;
           } else if (['.lua'].includes(ext)) {
-            cmd = `stylua "${resolvedPath}" || lua-format -i "${resolvedPath}"`;
+            cmd = `stylua ${fRef} || lua-format -i ${fRef}`;
           } else if (['.pl', '.pm'].includes(ext)) {
-            cmd = `perltidy -b "${resolvedPath}"`;
+            cmd = `perltidy -b ${fRef}`;
           } else if (['.r', '.R'].includes(ext)) {
-            cmd = `Rscript -e "styler::style_file('${resolvedPath}')"`;
+            cmd = `Rscript -e "styler::style_file(Sys.getenv('PLUMAR_TARGET_FILE'))"`;
           } else if (['.hs', '.lhs'].includes(ext)) {
-            cmd = `hindent "${resolvedPath}" || ormolu --mode inplace "${resolvedPath}" || brittany --inplace "${resolvedPath}"`;
+            cmd = `hindent ${fRef} || ormolu --mode inplace ${fRef} || brittany --inplace ${fRef}`;
           } else if (['.ex', '.exs'].includes(ext)) {
-            cmd = `mix format "${resolvedPath}"`;
+            cmd = `mix format ${fRef}`;
           } else if (['.sql'].includes(ext)) {
-            cmd = `npx sql-formatter --fix "${resolvedPath}"`;
+            cmd = `npx sql-formatter --fix ${fRef}`;
           } else if (['.xml'].includes(ext)) {
-            cmd = `xmllint --format --output "${resolvedPath}" "${resolvedPath}"`;
+            cmd = `xmllint --format --output ${fRef} ${fRef}`;
           } else if (['.clj', '.cljs', '.cljc', '.edn'].includes(ext)) {
-            cmd = `cljstyle fix "${resolvedPath}"`;
+            cmd = `cljstyle fix ${fRef}`;
           } else if (['.fs', '.fsi', '.fsx'].includes(ext)) {
-            cmd = `fantomas "${resolvedPath}"`;
+            cmd = `fantomas ${fRef}`;
           } else if (['.groovy', '.gvy', '.gy', '.gsh'].includes(ext)) {
-            cmd = `npm-groovy-lint --format "${resolvedPath}"`;
+            cmd = `npm-groovy-lint --format ${fRef}`;
           } else {
             // General fallback
-            cmd = `npx prettier --write "${resolvedPath}"`;
+            cmd = `npx prettier --write ${fRef}`;
           }
         } else { // action === 'lint'
           if (['.js', '.jsx', '.ts', '.tsx', '.json'].includes(ext)) {
-            cmd = `npx eslint --fix "${resolvedPath}"`;
+            cmd = `npx eslint --fix ${fRef}`;
           } else if (['.css', '.scss', '.sass', '.less'].includes(ext)) {
-            cmd = `npx stylelint --fix "${resolvedPath}"`;
+            cmd = `npx stylelint --fix ${fRef}`;
           } else if (['.html'].includes(ext)) {
-            cmd = `npx htmlhint "${resolvedPath}" || htmlhint "${resolvedPath}"`;
+            cmd = `npx htmlhint ${fRef} || htmlhint ${fRef}`;
           } else if (['.md'].includes(ext)) {
-            cmd = `npx markdownlint "${resolvedPath}" || markdownlint "${resolvedPath}"`;
+            cmd = `npx markdownlint ${fRef} || markdownlint ${fRef}`;
           } else if (['.yaml', '.yml'].includes(ext)) {
-            cmd = `yamllint "${resolvedPath}"`;
+            cmd = `yamllint ${fRef}`;
           } else if (['.py'].includes(ext)) {
-            cmd = `pylint "${resolvedPath}" || flake8 "${resolvedPath}" || python3 -m pylint "${resolvedPath}"`;
+            cmd = `pylint ${fRef} || flake8 ${fRef} || python3 -m pylint ${fRef}`;
           } else if (['.go'].includes(ext)) {
-            cmd = `go vet "${resolvedPath}" || golangci-lint run "${resolvedPath}"`;
+            cmd = `go vet ${fRef} || golangci-lint run ${fRef}`;
           } else if (['.rs'].includes(ext)) {
             cmd = `cargo clippy --fix --allow-dirty --allow-staged || cargo check`;
           } else if (['.cpp', '.hpp', '.cc', '.cxx', '.h', '.c', '.m', '.mm'].includes(ext)) {
-            cmd = `cppcheck "${resolvedPath}" || clang-tidy "${resolvedPath}"`;
+            cmd = `cppcheck ${fRef} || clang-tidy ${fRef}`;
           } else if (['.java'].includes(ext)) {
-            cmd = `checkstyle "${resolvedPath}" || javac -Xlint "${resolvedPath}"`;
+            cmd = `checkstyle ${fRef} || javac -Xlint ${fRef}`;
           } else if (['.cs'].includes(ext)) {
-            cmd = `dotnet format --verify-no-changes "${resolvedPath}"`;
+            cmd = `dotnet format --verify-no-changes ${fRef}`;
           } else if (['.rb'].includes(ext)) {
-            cmd = `rubocop "${resolvedPath}"`;
+            cmd = `rubocop ${fRef}`;
           } else if (['.php'].includes(ext)) {
-            cmd = `php -l "${resolvedPath}"`;
+            cmd = `php -l ${fRef}`;
           } else if (['.swift'].includes(ext)) {
-            cmd = `swiftlint "${resolvedPath}" || swift-format lint "${resolvedPath}"`;
+            cmd = `swiftlint ${fRef} || swift-format lint ${fRef}`;
           } else if (['.kt', '.kts'].includes(ext)) {
-            cmd = `ktlint "${resolvedPath}"`;
+            cmd = `ktlint ${fRef}`;
           } else if (['.dart'].includes(ext)) {
-            cmd = `dart analyze "${resolvedPath}"`;
+            cmd = `dart analyze ${fRef}`;
           } else if (['.sh', '.bash', '.zsh'].includes(ext)) {
-            cmd = `shellcheck "${resolvedPath}"`;
+            cmd = `shellcheck ${fRef}`;
           } else if (['.lua'].includes(ext)) {
-            cmd = `luacheck "${resolvedPath}"`;
+            cmd = `luacheck ${fRef}`;
           } else if (['.pl', '.pm'].includes(ext)) {
-            cmd = `perl -c "${resolvedPath}"`;
+            cmd = `perl -c ${fRef}`;
           } else if (['.r', '.R'].includes(ext)) {
-            cmd = `Rscript -e "lintr::lint('${resolvedPath}')"`;
+            cmd = `Rscript -e "lintr::lint(Sys.getenv('PLUMAR_TARGET_FILE'))"`;
           } else if (['.hs', '.lhs'].includes(ext)) {
-            cmd = `hlint "${resolvedPath}"`;
+            cmd = `hlint ${fRef}`;
           } else if (['.ex', '.exs'].includes(ext)) {
-            cmd = `mix credo "${resolvedPath}"`;
+            cmd = `mix credo ${fRef}`;
           } else if (['.sql'].includes(ext)) {
-            cmd = `sqlfluff lint "${resolvedPath}"`;
+            cmd = `sqlfluff lint ${fRef}`;
           } else if (['.xml'].includes(ext)) {
-            cmd = `xmllint --noout "${resolvedPath}"`;
+            cmd = `xmllint --noout ${fRef}`;
           } else if (['.clj', '.cljs', '.cljc', '.edn'].includes(ext)) {
-            cmd = `clj-kondo --lint "${resolvedPath}"`;
+            cmd = `clj-kondo --lint ${fRef}`;
           } else if (['.groovy', '.gvy', '.gy', '.gsh'].includes(ext)) {
-            cmd = `npm-groovy-lint "${resolvedPath}"`;
+            cmd = `npm-groovy-lint ${fRef}`;
           } else {
             // General fallback
-            cmd = `npx eslint --fix "${resolvedPath}"`;
+            cmd = `npx eslint --fix ${fRef}`;
           }
         }
 
+        const displayCmd = cmd.replaceAll(fRef, `"${resolvedPath}"`);
+
         return new Promise((resolve) => {
-          exec(cmd, (err, stdout, stderr) => {
+          exec(cmd, { env: { ...process.env, PLUMAR_TARGET_FILE: resolvedPath } }, (err, stdout, stderr) => {
             const errStr = ((stderr || '') + (stdout || '') + (err ? err.message : '')).toLowerCase();
             if (err) {
               const isNotFound = errStr.includes('not found') || 
@@ -322,7 +344,7 @@ export const developmentTools = {
               if (isNotFound) {
                 return resolve({
                   success: true,
-                  message: `Notice: '${action}' tool for extension '${ext}' is not installed or configured in the workspace. Command attempted: ${cmd}`,
+                  message: `Notice: '${action}' tool for extension '${ext}' is not installed or configured in the workspace. Command attempted: ${displayCmd}`,
                   stdout: stdout.trim(),
                   stderr: stderr.trim(),
                   fallbackUsed: true
@@ -330,7 +352,7 @@ export const developmentTools = {
               }
               return resolve({
                 success: false,
-                error: `Command failed: ${cmd}\nStderr: ${stderr.trim() || stderr || err.message}`
+                error: `Command failed: ${displayCmd}\nStderr: ${stderr.trim() || stderr || err.message}`
               });
             }
             resolve({
@@ -578,13 +600,13 @@ export const developmentTools = {
 
         const runPsql = (query) => {
           return new Promise((resolve) => {
-            const escapedQuery = query.replace(/"/g, '\\"').replace(/`/g, '\\`');
-            const cmd = `psql "${connectionUri}" -A -F ',' -c "${escapedQuery}"`;
-            exec(cmd, (err, stdout, stderr) => {
+            const args = [connectionUri, '-A', '-F', ',', '-c', query];
+            const displayCmd = `psql ${args.map(a => JSON.stringify(a)).join(' ')}`;
+            execFile('psql', args, (err, stdout, stderr) => {
               if (err) {
                 return resolve({
                   success: false,
-                  error: `PostgreSQL query execution failed.\nCommand: ${cmd}\nStderr: ${stderr.trim()}`
+                  error: `PostgreSQL query execution failed.\nCommand: ${displayCmd}\nStderr: ${(stderr || err.message || '').trim()}`
                 });
               }
               const lines = stdout.trim().split('\n');
@@ -607,25 +629,42 @@ export const developmentTools = {
 
         const runMysql = (query) => {
           return new Promise((resolve) => {
-            const escapedQuery = query.replace(/"/g, '\\"').replace(/`/g, '\\`');
-            let cmd;
+            let mysqlArgs;
+            let displayArgs;
             try {
               const url = new URL(connectionUri);
               const host = url.hostname || 'localhost';
               const port = url.port || '3306';
-              const user = url.username || 'root';
-              const password = url.password ? `-p"${url.password}"` : '';
+              const user = decodeURIComponent(url.username || 'root');
+              const password = url.password ? decodeURIComponent(url.password) : '';
               const database = url.pathname ? url.pathname.replace(/^\//, '') : '';
-              cmd = `mysql -h "${host}" -P ${port} -u "${user}" ${password} ${database ? `-D "${database}"` : ''} -B -N -e "${escapedQuery}"`;
+              mysqlArgs = [
+                '-h', host,
+                '-P', String(port),
+                '-u', user,
+                ...(password ? [`-p${password}`] : []),
+                ...(database ? ['-D', database] : []),
+                '-B', '-N', '-e', query
+              ];
+              displayArgs = [
+                '-h', host,
+                '-P', String(port),
+                '-u', user,
+                ...(password ? ['-p***'] : []),
+                ...(database ? ['-D', database] : []),
+                '-B', '-N', '-e', query
+              ];
             } catch {
-              cmd = `mysql "${connectionUri}" -B -N -e "${escapedQuery}"`;
+              mysqlArgs = [connectionUri, '-B', '-N', '-e', query];
+              displayArgs = mysqlArgs;
             }
 
-            exec(cmd, (err, stdout, stderr) => {
+            const displayCmd = `mysql ${displayArgs.map(a => JSON.stringify(a)).join(' ')}`;
+            execFile('mysql', mysqlArgs, (err, stdout, stderr) => {
               if (err) {
                 return resolve({
                   success: false,
-                  error: `MySQL query execution failed.\nCommand: ${cmd}\nStderr: ${stderr.trim()}`
+                  error: `MySQL query execution failed.\nCommand: ${displayCmd}\nStderr: ${(stderr || err.message || '').trim()}`
                 });
               }
               const lines = stdout.trim().split('\n');
@@ -664,7 +703,8 @@ export const developmentTools = {
             const schemaDetails = [];
 
             for (const table of tables) {
-              const descRes = await runMysql(`DESCRIBE \`${table}\`;`);
+              const safeTable = String(table).replace(/`/g, '``');
+              const descRes = await runMysql(`DESCRIBE \`${safeTable}\`;`);
               if (descRes.success) {
                 schemaDetails.push({
                   table,
@@ -1150,6 +1190,127 @@ export const developmentTools = {
           setLastWorkspaceFile(targetFilePath);
         }
 
+        const RESERVED_KEYWORDS = new Set([
+          'if', 'while', 'for', 'switch', 'catch', 'return', 'else', 'using', 'namespace',
+          'template', 'typedef', 'operator', 'const', 'let', 'var', 'class', 'struct', 'func', 'def', 'function',
+          'public', 'private', 'protected', 'static', 'final', 'abstract', 'synchronized', 'override', 'virtual',
+          'internal', 'async', 'await', 'fn', 'fun', 'object', 'module', 'protocol', 'interface', 'enum',
+          'new', 'super', 'this', 'import', 'export', 'package', 'throws', 'throw', 'do', 'case', 'break', 'continue'
+        ]);
+
+        const extractFileDefinitions = (f, fileContent) => {
+          const ext = path.extname(f).toLowerCase();
+          const classRegexes = [];
+          const funcRegexes = [];
+          const fileDefs = [];
+
+          if (['.js', '.jsx', '.ts', '.tsx'].includes(ext)) {
+            classRegexes.push(/\bclass\s+([a-zA-Z0-9_$]+)/g);
+            funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_$]+)/g);
+            funcRegexes.push(/\b(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/g);
+          } else if (['.py'].includes(ext)) {
+            classRegexes.push(/\bclass\s+([a-zA-Z0-9_$]+)/g);
+            funcRegexes.push(/\bdef\s+([a-zA-Z0-9_$]+)/g);
+          } else if (['.go'].includes(ext)) {
+            classRegexes.push(/\btype\s+([a-zA-Z0-9_$]+)\s+struct\b/g);
+            funcRegexes.push(/\bfunc\s+([a-zA-Z0-9_$]+)\s*\(/g);
+            funcRegexes.push(/\bfunc\s*\([^)]+\)\s*([a-zA-Z0-9_$]+)\s*\(/g);
+          } else if (['.cpp', '.hpp', '.h', '.cc', '.cxx', '.c'].includes(ext)) {
+            classRegexes.push(/\b(?:class|struct)\s+([a-zA-Z0-9_$]+)/g);
+            funcRegexes.push(/\b[a-zA-Z0-9_:<>]+\s+([a-zA-Z0-9_$]+)\s*\([^)]*\)\s*(?:const)?\s*\{/g);
+          } else if (['.java'].includes(ext)) {
+            classRegexes.push(/\b(?:class|interface|enum)\s+([a-zA-Z0-9_$]+)/g);
+            funcRegexes.push(/\b[a-zA-Z0-9_:<>\[\]]+\s+([a-zA-Z0-9_$]+)\s*\([^)]*\)\s*(?:throws\s+[a-zA-Z0-9_$,\s]+)?\s*\{/g);
+          } else if (['.cs'].includes(ext)) {
+            classRegexes.push(/\b(?:class|interface|struct|enum)\s+([a-zA-Z0-9_$]+)/g);
+            funcRegexes.push(/\b[a-zA-Z0-9_:<>\[\]]+\s+([a-zA-Z0-9_$]+)\s*\([^)]*\)\s*\{/g);
+          } else if (['.dart'].includes(ext)) {
+            classRegexes.push(/\bclass\s+([a-zA-Z0-9_$]+)/g);
+            funcRegexes.push(/\b[a-zA-Z0-9_:<>\[\]]+\s+([a-zA-Z0-9_$]+)\s*\([^)]*\)\s*\{/g);
+          } else if (['.lua'].includes(ext)) {
+            funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_.:]+)\s*\(/g);
+          } else if (['.pl', '.pm'].includes(ext)) {
+            classRegexes.push(/\bpackage\s+([a-zA-Z0-9_:]+)/g);
+            funcRegexes.push(/\bsub\s+([a-zA-Z0-9_]+)/g);
+          } else if (['.r', '.R'].includes(ext)) {
+            classRegexes.push(/\bsetClass\s*\(\s*["']([a-zA-Z0-9_]+)["']/g);
+            funcRegexes.push(/\b([a-zA-Z0-9_]+)\s*(?:<-|=)\s*function\b/g);
+          } else if (['.hs'].includes(ext)) {
+            classRegexes.push(/\b(?:data|newtype|class)\s+([a-zA-Z0-9_]+)/g);
+            funcRegexes.push(/\b([a-zA-Z0-9_]+)\s*::\s*/g);
+          } else if (['.ex', '.exs'].includes(ext)) {
+            classRegexes.push(/\bdefmodule\s+([a-zA-Z0-9_.]+)/g);
+            funcRegexes.push(/\bdefp?\s+([a-zA-Z0-9_!?]+)/g);
+          } else if (['.clj', '.cljs'].includes(ext)) {
+            classRegexes.push(/\(\s*ns\s+([a-zA-Z0-9_.-]+)/g);
+            funcRegexes.push(/\(\s*defn-?\s+([a-zA-Z0-9_.-?!]+)/g);
+          } else if (['.jl'].includes(ext)) {
+            classRegexes.push(/\b(?:mutable\s+)?struct\s+([a-zA-Z0-9_]+)/g);
+            funcRegexes.push(/\b(?:function|macro)\s+([a-zA-Z0-9_!?]+)/g);
+          } else if (['.sql'].includes(ext)) {
+            classRegexes.push(/\bCREATE\s+(?:TABLE|VIEW)\s+([a-zA-Z0-9_]+)/gi);
+            funcRegexes.push(/\bCREATE\s+(?:FUNCTION|PROCEDURE)\s+([a-zA-Z0-9_]+)/gi);
+          } else if (['.rs'].includes(ext)) {
+            classRegexes.push(/\b(?:struct|enum|trait)\s+([a-zA-Z0-9_]+)/g);
+            funcRegexes.push(/\bfn\s+([a-zA-Z0-9_]+)\s*(?:<[^>]+>)?\s*\(/g);
+          } else if (['.rb'].includes(ext)) {
+            classRegexes.push(/\b(?:class|module)\s+([a-zA-Z0-9_$]+)/g);
+            funcRegexes.push(/\bdef\s+([a-zA-Z0-9_?!]+)/g);
+          } else if (['.php'].includes(ext)) {
+            classRegexes.push(/\b(?:class|interface|trait)\s+([a-zA-Z0-9_]+)/g);
+            funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_]+)\s*\(/g);
+          } else if (['.swift'].includes(ext)) {
+            classRegexes.push(/\b(?:class|struct|enum|protocol)\s+([a-zA-Z0-9_]+)/g);
+            funcRegexes.push(/\bfunc\s+([a-zA-Z0-9_]+)\s*(?:<[^>]+>)?\s*\(/g);
+          } else if (['.kt', '.kts'].includes(ext)) {
+            classRegexes.push(/\b(?:class|interface|object)\s+([a-zA-Z0-9_]+)/g);
+            funcRegexes.push(/\bfun\s+([a-zA-Z0-9_]+)\s*(?:<[^>]+>)?\s*\(/g);
+          } else if (['.scala'].includes(ext)) {
+            classRegexes.push(/\b(?:class|trait|object)\s+([a-zA-Z0-9_$]+)/g);
+            funcRegexes.push(/\bdef\s+([a-zA-Z0-9_$]+)\s*(?:<[^>]+>)?\s*\(/g);
+          } else if (['.css'].includes(ext)) {
+            classRegexes.push(/\.([a-zA-Z0-9_-]+)\s*(?:,|{)/g);
+            funcRegexes.push(/@keyframes\s+([a-zA-Z0-9_-]+)/g);
+          } else if (['.scss'].includes(ext)) {
+            classRegexes.push(/\.([a-zA-Z0-9_-]+)\s*(?:,|{)/g);
+            classRegexes.push(/%([a-zA-Z0-9_-]+)\s*(?:,|{)/g);
+            funcRegexes.push(/@(?:mixin|function)\s+([a-zA-Z0-9_-]+)/g);
+          } else if (['.sass'].includes(ext)) {
+            classRegexes.push(/\.([a-zA-Z0-9_-]+)/g);
+            funcRegexes.push(/(?:@mixin\s+|=)([a-zA-Z0-9_-]+)/g);
+          } else if (['.less'].includes(ext)) {
+            classRegexes.push(/\.([a-zA-Z0-9_-]+)\s*(?:,|{)/g);
+            funcRegexes.push(/\.([a-zA-Z0-9_-]+)\s*\([^)]*\)\s*\{/g);
+          } else if (['.sh', '.bash'].includes(ext)) {
+            funcRegexes.push(/\b([a-zA-Z0-9_-]+)\s*\(\s*\)\s*\{/g);
+            funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_-]+)/g);
+          } else {
+            classRegexes.push(/\bclass\s+([a-zA-Z0-9_$]+)/g);
+            funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_$]+)/g);
+            funcRegexes.push(/\bdef\s+([a-zA-Z0-9_$]+)/g);
+          }
+
+          const processRegex = (re, type) => {
+            let match;
+            re.lastIndex = 0;
+            while ((match = re.exec(fileContent)) !== null) {
+              const name = match[1];
+              if (RESERVED_KEYWORDS.has(name)) continue;
+              const line = getLineNumber(fileContent, match.index);
+              fileDefs.push({
+                name,
+                type,
+                file: f,
+                line
+              });
+            }
+          };
+
+          for (const re of classRegexes) processRegex(re, 'class');
+          for (const re of funcRegexes) processRegex(re, 'function');
+          return fileDefs;
+        };
+
         // 2. Process correlation if requested
         let correlationReport = null;
         if (correlate) {
@@ -1163,125 +1324,9 @@ export const developmentTools = {
           }
 
           const definitions = [];
-          const reservedKeywords = new Set([
-            'if', 'while', 'for', 'switch', 'catch', 'return', 'else', 'using', 'namespace', 
-            'template', 'typedef', 'operator', 'const', 'let', 'var', 'class', 'struct', 'func', 'def', 'function',
-            'public', 'private', 'protected', 'static', 'final', 'abstract', 'synchronized', 'override', 'virtual',
-            'internal', 'async', 'await', 'fn', 'fun', 'object', 'module', 'protocol', 'interface', 'enum',
-            'new', 'super', 'this', 'import', 'export', 'package', 'throws', 'throw', 'do', 'case', 'break', 'continue'
-          ]);
-
           for (const f of scanFiles) {
             const fileContent = fileContents[f];
-            const ext = path.extname(f).toLowerCase();
-
-            const classRegexes = [];
-            const funcRegexes = [];
-
-            if (['.js', '.jsx', '.ts', '.tsx'].includes(ext)) {
-              classRegexes.push(/\bclass\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\b(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/g);
-            } else if (['.py'].includes(ext)) {
-              classRegexes.push(/\bclass\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\bdef\s+([a-zA-Z0-9_$]+)/g);
-            } else if (['.go'].includes(ext)) {
-              classRegexes.push(/\btype\s+([a-zA-Z0-9_$]+)\s+struct\b/g);
-              funcRegexes.push(/\bfunc\s+([a-zA-Z0-9_$]+)\s*\(/g);
-              funcRegexes.push(/\bfunc\s*\([^)]+\)\s*([a-zA-Z0-9_$]+)\s*\(/g);
-            } else if (['.cpp', '.hpp', '.h', '.cc', '.cxx', '.c'].includes(ext)) {
-              classRegexes.push(/\b(?:class|struct)\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\b[a-zA-Z0-9_:<>]+\s+([a-zA-Z0-9_$]+)\s*\([^)]*\)\s*(?:const)?\s*\{/g);
-            } else if (['.java'].includes(ext)) {
-              classRegexes.push(/\b(?:class|interface|enum)\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\b[a-zA-Z0-9_:<>\[\]]+\s+([a-zA-Z0-9_$]+)\s*\([^)]*\)\s*(?:throws\s+[a-zA-Z0-9_$,\s]+)?\s*\{/g);
-            } else if (['.cs'].includes(ext)) {
-              classRegexes.push(/\b(?:class|interface|struct|enum)\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\b[a-zA-Z0-9_:<>\[\]]+\s+([a-zA-Z0-9_$]+)\s*\([^)]*\)\s*\{/g);
-            } else if (['.dart'].includes(ext)) {
-              classRegexes.push(/\bclass\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\b[a-zA-Z0-9_:<>\[\]]+\s+([a-zA-Z0-9_$]+)\s*\([^)]*\)\s*\{/g);
-            } else if (['.lua'].includes(ext)) {
-              funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_.:]+)\s*\(/g);
-            } else if (['.pl', '.pm'].includes(ext)) {
-              classRegexes.push(/\bpackage\s+([a-zA-Z0-9_:]+)/g);
-              funcRegexes.push(/\bsub\s+([a-zA-Z0-9_]+)/g);
-            } else if (['.r', '.R'].includes(ext)) {
-              classRegexes.push(/\bsetClass\s*\(\s*["']([a-zA-Z0-9_]+)["']/g);
-              funcRegexes.push(/\b([a-zA-Z0-9_]+)\s*(?:<-|=)\s*function\b/g);
-            } else if (['.hs'].includes(ext)) {
-              classRegexes.push(/\b(?:data|newtype|class)\s+([a-zA-Z0-9_]+)/g);
-              funcRegexes.push(/\b([a-zA-Z0-9_]+)\s*::\s*/g);
-            } else if (['.ex', '.exs'].includes(ext)) {
-              classRegexes.push(/\bdefmodule\s+([a-zA-Z0-9_.]+)/g);
-              funcRegexes.push(/\bdefp?\s+([a-zA-Z0-9_!?]+)/g);
-            } else if (['.clj', '.cljs'].includes(ext)) {
-              classRegexes.push(/\(\s*ns\s+([a-zA-Z0-9_.-]+)/g);
-              funcRegexes.push(/\(\s*defn-?\s+([a-zA-Z0-9_.-?!]+)/g);
-            } else if (['.jl'].includes(ext)) {
-              classRegexes.push(/\b(?:mutable\s+)?struct\s+([a-zA-Z0-9_]+)/g);
-              funcRegexes.push(/\b(?:function|macro)\s+([a-zA-Z0-9_!?]+)/g);
-            } else if (['.sql'].includes(ext)) {
-              classRegexes.push(/\bCREATE\s+(?:TABLE|VIEW)\s+([a-zA-Z0-9_]+)/gi);
-              funcRegexes.push(/\bCREATE\s+(?:FUNCTION|PROCEDURE)\s+([a-zA-Z0-9_]+)/gi);
-            } else if (['.rs'].includes(ext)) {
-              classRegexes.push(/\b(?:struct|enum|trait)\s+([a-zA-Z0-9_]+)/g);
-              funcRegexes.push(/\bfn\s+([a-zA-Z0-9_]+)\s*(?:<[^>]+>)?\s*\(/g);
-            } else if (['.rb'].includes(ext)) {
-              classRegexes.push(/\b(?:class|module)\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\bdef\s+([a-zA-Z0-9_?!]+)/g);
-            } else if (['.php'].includes(ext)) {
-              classRegexes.push(/\b(?:class|interface|trait)\s+([a-zA-Z0-9_]+)/g);
-              funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_]+)\s*\(/g);
-            } else if (['.swift'].includes(ext)) {
-              classRegexes.push(/\b(?:class|struct|enum|protocol)\s+([a-zA-Z0-9_]+)/g);
-              funcRegexes.push(/\bfunc\s+([a-zA-Z0-9_]+)\s*(?:<[^>]+>)?\s*\(/g);
-            } else if (['.kt', '.kts'].includes(ext)) {
-              classRegexes.push(/\b(?:class|interface|object)\s+([a-zA-Z0-9_]+)/g);
-              funcRegexes.push(/\bfun\s+([a-zA-Z0-9_]+)\s*(?:<[^>]+>)?\s*\(/g);
-            } else if (['.scala'].includes(ext)) {
-              classRegexes.push(/\b(?:class|trait|object)\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\bdef\s+([a-zA-Z0-9_$]+)\s*(?:<[^>]+>)?\s*\(/g);
-            } else if (['.css'].includes(ext)) {
-              classRegexes.push(/\.([a-zA-Z0-9_-]+)\s*(?:,|{)/g);
-              funcRegexes.push(/@keyframes\s+([a-zA-Z0-9_-]+)/g);
-            } else if (['.scss'].includes(ext)) {
-              classRegexes.push(/\.([a-zA-Z0-9_-]+)\s*(?:,|{)/g);
-              classRegexes.push(/%([a-zA-Z0-9_-]+)\s*(?:,|{)/g);
-              funcRegexes.push(/@(?:mixin|function)\s+([a-zA-Z0-9_-]+)/g);
-            } else if (['.sass'].includes(ext)) {
-              classRegexes.push(/\.([a-zA-Z0-9_-]+)/g);
-              funcRegexes.push(/(?:@mixin\s+|=)([a-zA-Z0-9_-]+)/g);
-            } else if (['.less'].includes(ext)) {
-              classRegexes.push(/\.([a-zA-Z0-9_-]+)\s*(?:,|{)/g);
-              funcRegexes.push(/\.([a-zA-Z0-9_-]+)\s*\([^)]*\)\s*\{/g);
-            } else if (['.sh', '.bash'].includes(ext)) {
-              funcRegexes.push(/\b([a-zA-Z0-9_-]+)\s*\(\s*\)\s*\{/g);
-              funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_-]+)/g);
-            } else {
-              classRegexes.push(/\bclass\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\bdef\s+([a-zA-Z0-9_$]+)/g);
-            }
-
-            const processRegex = (re, type) => {
-              let match;
-              re.lastIndex = 0;
-              while ((match = re.exec(fileContent)) !== null) {
-                const name = match[1];
-                if (reservedKeywords.has(name)) continue;
-                const line = getLineNumber(fileContent, match.index);
-                definitions.push({
-                  name,
-                  type,
-                  file: f,
-                  line
-                });
-              }
-            };
-
-            for (const re of classRegexes) processRegex(re, 'class');
-            for (const re of funcRegexes) processRegex(re, 'function');
+            definitions.push(...extractFileDefinitions(f, fileContent));
           }
 
           const targetNames = new Set();
@@ -1380,135 +1425,12 @@ export const developmentTools = {
 
           const matches = [];
 
-          const getFileDefinitions = (f, fileContent) => {
-            const ext = path.extname(f).toLowerCase();
-            const classRegexes = [];
-            const funcRegexes = [];
-            const fileDefs = [];
-
-            const reservedKeywords = new Set([
-              'if', 'while', 'for', 'switch', 'catch', 'return', 'else', 'using', 'namespace', 
-              'template', 'typedef', 'operator', 'const', 'let', 'var', 'class', 'struct', 'func', 'def', 'function',
-              'public', 'private', 'protected', 'static', 'final', 'abstract', 'synchronized', 'override', 'virtual',
-              'internal', 'async', 'await', 'fn', 'fun', 'object', 'module', 'protocol', 'interface', 'enum',
-              'new', 'super', 'this', 'import', 'export', 'package', 'throws', 'throw', 'do', 'case', 'break', 'continue'
-            ]);
-
-            if (['.js', '.jsx', '.ts', '.tsx'].includes(ext)) {
-              classRegexes.push(/\bclass\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\b(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/g);
-            } else if (['.py'].includes(ext)) {
-              classRegexes.push(/\bclass\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\bdef\s+([a-zA-Z0-9_$]+)/g);
-            } else if (['.go'].includes(ext)) {
-              classRegexes.push(/\btype\s+([a-zA-Z0-9_$]+)\s+struct\b/g);
-              funcRegexes.push(/\bfunc\s+([a-zA-Z0-9_$]+)\s*\(/g);
-              funcRegexes.push(/\bfunc\s*\([^)]+\)\s*([a-zA-Z0-9_$]+)\s*\(/g);
-            } else if (['.cpp', '.hpp', '.h', '.cc', '.cxx', '.c'].includes(ext)) {
-              classRegexes.push(/\b(?:class|struct)\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\b[a-zA-Z0-9_:<>]+\s+([a-zA-Z0-9_$]+)\s*\([^)]*\)\s*(?:const)?\s*\{/g);
-            } else if (['.java'].includes(ext)) {
-              classRegexes.push(/\b(?:class|interface|enum)\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\b[a-zA-Z0-9_:<>\[\]]+\s+([a-zA-Z0-9_$]+)\s*\([^)]*\)\s*(?:throws\s+[a-zA-Z0-9_$,\s]+)?\s*\{/g);
-            } else if (['.cs'].includes(ext)) {
-              classRegexes.push(/\b(?:class|interface|struct|enum)\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\b[a-zA-Z0-9_:<>\[\]]+\s+([a-zA-Z0-9_$]+)\s*\([^)]*\)\s*\{/g);
-            } else if (['.dart'].includes(ext)) {
-              classRegexes.push(/\bclass\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\b[a-zA-Z0-9_:<>\[\]]+\s+([a-zA-Z0-9_$]+)\s*\([^)]*\)\s*\{/g);
-            } else if (['.lua'].includes(ext)) {
-              funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_.:]+)\s*\(/g);
-            } else if (['.pl', '.pm'].includes(ext)) {
-              classRegexes.push(/\bpackage\s+([a-zA-Z0-9_:]+)/g);
-              funcRegexes.push(/\bsub\s+([a-zA-Z0-9_]+)/g);
-            } else if (['.r', '.R'].includes(ext)) {
-              classRegexes.push(/\bsetClass\s*\(\s*["']([a-zA-Z0-9_]+)["']/g);
-              funcRegexes.push(/\b([a-zA-Z0-9_]+)\s*(?:<-|=)\s*function\b/g);
-            } else if (['.hs'].includes(ext)) {
-              classRegexes.push(/\b(?:data|newtype|class)\s+([a-zA-Z0-9_]+)/g);
-              funcRegexes.push(/\b([a-zA-Z0-9_]+)\s*::\s*/g);
-            } else if (['.ex', '.exs'].includes(ext)) {
-              classRegexes.push(/\bdefmodule\s+([a-zA-Z0-9_.]+)/g);
-              funcRegexes.push(/\bdefp?\s+([a-zA-Z0-9_!?]+)/g);
-            } else if (['.clj', '.cljs'].includes(ext)) {
-              classRegexes.push(/\(\s*ns\s+([a-zA-Z0-9_.-]+)/g);
-              funcRegexes.push(/\(\s*defn-?\s+([a-zA-Z0-9_.-?!]+)/g);
-            } else if (['.jl'].includes(ext)) {
-              classRegexes.push(/\b(?:mutable\s+)?struct\s+([a-zA-Z0-9_]+)/g);
-              funcRegexes.push(/\b(?:function|macro)\s+([a-zA-Z0-9_!?]+)/g);
-            } else if (['.sql'].includes(ext)) {
-              classRegexes.push(/\bCREATE\s+(?:TABLE|VIEW)\s+([a-zA-Z0-9_]+)/gi);
-              funcRegexes.push(/\bCREATE\s+(?:FUNCTION|PROCEDURE)\s+([a-zA-Z0-9_]+)/gi);
-            } else if (['.rs'].includes(ext)) {
-              classRegexes.push(/\b(?:struct|enum|trait)\s+([a-zA-Z0-9_]+)/g);
-              funcRegexes.push(/\bfn\s+([a-zA-Z0-9_]+)\s*(?:<[^>]+>)?\s*\(/g);
-            } else if (['.rb'].includes(ext)) {
-              classRegexes.push(/\b(?:class|module)\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\bdef\s+([a-zA-Z0-9_?!]+)/g);
-            } else if (['.php'].includes(ext)) {
-              classRegexes.push(/\b(?:class|interface|trait)\s+([a-zA-Z0-9_]+)/g);
-              funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_]+)\s*\(/g);
-            } else if (['.swift'].includes(ext)) {
-              classRegexes.push(/\b(?:class|struct|enum|protocol)\s+([a-zA-Z0-9_]+)/g);
-              funcRegexes.push(/\bfunc\s+([a-zA-Z0-9_]+)\s*(?:<[^>]+>)?\s*\(/g);
-            } else if (['.kt', '.kts'].includes(ext)) {
-              classRegexes.push(/\b(?:class|interface|object)\s+([a-zA-Z0-9_]+)/g);
-              funcRegexes.push(/\bfun\s+([a-zA-Z0-9_]+)\s*(?:<[^>]+>)?\s*\(/g);
-            } else if (['.scala'].includes(ext)) {
-              classRegexes.push(/\b(?:class|trait|object)\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\bdef\s+([a-zA-Z0-9_$]+)\s*(?:<[^>]+>)?\s*\(/g);
-            } else if (['.css'].includes(ext)) {
-              classRegexes.push(/\.([a-zA-Z0-9_-]+)\s*(?:,|{)/g);
-              funcRegexes.push(/@keyframes\s+([a-zA-Z0-9_-]+)/g);
-            } else if (['.scss'].includes(ext)) {
-              classRegexes.push(/\.([a-zA-Z0-9_-]+)\s*(?:,|{)/g);
-              classRegexes.push(/%([a-zA-Z0-9_-]+)\s*(?:,|{)/g);
-              funcRegexes.push(/@(?:mixin|function)\s+([a-zA-Z0-9_-]+)/g);
-            } else if (['.sass'].includes(ext)) {
-              classRegexes.push(/\.([a-zA-Z0-9_-]+)/g);
-              funcRegexes.push(/(?:@mixin\s+|=)([a-zA-Z0-9_-]+)/g);
-            } else if (['.less'].includes(ext)) {
-              classRegexes.push(/\.([a-zA-Z0-9_-]+)\s*(?:,|{)/g);
-              funcRegexes.push(/\.([a-zA-Z0-9_-]+)\s*\([^)]*\)\s*\{/g);
-            } else if (['.sh', '.bash'].includes(ext)) {
-              funcRegexes.push(/\b([a-zA-Z0-9_-]+)\s*\(\s*\)\s*\{/g);
-              funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_-]+)/g);
-            } else {
-              classRegexes.push(/\bclass\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\bfunction\s+([a-zA-Z0-9_$]+)/g);
-              funcRegexes.push(/\bdef\s+([a-zA-Z0-9_$]+)/g);
-            }
-
-            const processRegex = (re, type) => {
-              let match;
-              re.lastIndex = 0;
-              while ((match = re.exec(fileContent)) !== null) {
-                const name = match[1];
-                if (reservedKeywords.has(name)) continue;
-                const line = getLineNumber(fileContent, match.index);
-                fileDefs.push({
-                  name,
-                  type,
-                  file: f,
-                  line
-                });
-              }
-            };
-
-            for (const re of classRegexes) processRegex(re, 'class');
-            for (const re of funcRegexes) processRegex(re, 'function');
-
-            fileDefs.sort((a, b) => a.line - b.line);
-            return fileDefs;
-          };
-
           for (const f of searchFiles) {
             const fileContent = fileContents[f];
             const ext = path.extname(f).toLowerCase();
             const lines = fileContent.split('\n');
 
-            const fileDefs = getFileDefinitions(f, fileContent);
+            const fileDefs = extractFileDefinitions(f, fileContent).sort((a, b) => a.line - b.line);
 
             let insideBlock = false;
             let blockType = '';
@@ -1651,9 +1573,9 @@ export const developmentTools = {
             setLastWorkspaceFile(f);
 
             if (lintAndFormat) {
-              const formatCmd = `npx prettier --write "${resolved}"`;
+              const npxBin = process.platform === 'win32' ? 'npx.cmd' : 'npx';
               await new Promise((resolve) => {
-                exec(formatCmd, () => {
+                execFile(npxBin, ['prettier', '--write', resolved], () => {
                   resolve();
                 });
               });

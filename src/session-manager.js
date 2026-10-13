@@ -2,6 +2,7 @@ import { InMemorySessionService } from '@google/adk';
 import fs from 'fs/promises';
 import path from 'path';
 import pc from 'picocolors';
+import { getOllamaBaseUrl, getOllamaHeaders, getLlmProvider } from './agent-config.js';
 
 /**
  * Clean and sanitize sessionId to prevent path traversal
@@ -12,17 +13,47 @@ function sanitizeSessionId(sessionId) {
 }
 
 /**
- * Resolve the Ollama server base URL from environment or fallback to localhost
+ * Build endpoint URL, headers, and payload for LLM-driven session minimization
+ * respecting the active provider (Ollama vs LM Studio), custom host, and API key.
  */
-function getOllamaBaseUrl() {
-  let host = process.env.OLLAMA_HOST || 'http://localhost:11434';
-  if (!host.startsWith('http://') && !host.startsWith('https://')) {
-    host = 'http://' + host;
+function buildMinimizationRequest(modelName, systemContent, userContent) {
+  const provider = getLlmProvider();
+  const baseUrl = getOllamaBaseUrl();
+  const headers = getOllamaHeaders();
+  const messages = [
+    { role: 'system', content: systemContent },
+    { role: 'user', content: userContent }
+  ];
+
+  if (provider === 'lmstudio') {
+    let url = baseUrl;
+    if (!url.endsWith('/v1') && !url.includes('/v1/')) {
+      url = url + '/v1';
+    }
+    return {
+      url: `${url}/chat/completions`,
+      headers,
+      body: JSON.stringify({
+        model: modelName,
+        messages,
+        stream: false,
+        temperature: 0.3
+      })
+    };
   }
-  if (host.endsWith('/')) {
-    host = host.slice(0, -1);
-  }
-  return host;
+
+  return {
+    url: `${baseUrl}/api/chat`,
+    headers,
+    body: JSON.stringify({
+      model: modelName,
+      messages,
+      stream: false,
+      options: {
+        temperature: 0.3
+      }
+    })
+  };
 }
 
 /**
@@ -43,12 +74,14 @@ function localHeuristicMinimize(contentStr) {
 
 /**
  * A highly robust file-persisted session service extending ADK's InMemorySessionService.
- * Seamlessly manages session files inside the workspace sandbox under .antigravitycli/sessions.
+ * Seamlessly manages session files inside the workspace sandbox under .plumar/sessions
+ * (with automatic backwards-compatible loading from .antigravitycli/sessions).
  */
 export class PersistentFileSessionService extends InMemorySessionService {
   constructor(storageDir) {
     super();
-    this.storageDir = storageDir || path.join(process.cwd(), '.antigravitycli', 'sessions');
+    this.storageDir = storageDir || path.join(process.cwd(), '.plumar', 'sessions');
+    this.legacyStorageDir = storageDir ? null : path.join(process.cwd(), '.antigravitycli', 'sessions');
     this._initialized = false;
   }
 
@@ -58,37 +91,45 @@ export class PersistentFileSessionService extends InMemorySessionService {
   async init() {
     if (this._initialized) return;
 
-    try {
-      await fs.mkdir(this.storageDir, { recursive: true });
-      const files = await fs.readdir(this.storageDir);
-      
-      for (const file of files) {
-        if (file.endsWith('.json')) {
-          const filePath = path.join(this.storageDir, file);
-          try {
-            const content = await fs.readFile(filePath, 'utf8');
-            const session = JSON.parse(content);
-            
-            if (session && session.id && session.appName && session.userId) {
-              const { appName, userId, id } = session;
-              
-              if (!this.sessions[appName]) {
-                this.sessions[appName] = {};
+    const loadFromDir = async (dirPath) => {
+      if (!dirPath) return;
+      try {
+        await fs.mkdir(dirPath, { recursive: true });
+        const files = await fs.readdir(dirPath);
+
+        for (const file of files) {
+          if (file.endsWith('.json')) {
+            const filePath = path.join(dirPath, file);
+            try {
+              const content = await fs.readFile(filePath, 'utf8');
+              const session = JSON.parse(content);
+
+              if (session && session.id && session.appName && session.userId) {
+                const { appName, userId, id } = session;
+
+                if (!this.sessions[appName]) {
+                  this.sessions[appName] = {};
+                }
+                if (!this.sessions[appName][userId]) {
+                  this.sessions[appName][userId] = {};
+                }
+                this.sessions[appName][userId][id] = session;
               }
-              if (!this.sessions[appName][userId]) {
-                this.sessions[appName][userId] = {};
-              }
-              this.sessions[appName][userId][id] = session;
+            } catch {
+              // Silently ignore corrupted session files
             }
-          } catch (err) {
-            // Silently ignore corrupted session files
           }
         }
+      } catch {
+        // Ignore directory read/creation errors
       }
-    } catch (err) {
-      // Ignore initial directory read/creation errors
+    };
+
+    if (this.legacyStorageDir) {
+      await loadFromDir(this.legacyStorageDir);
     }
-    
+    await loadFromDir(this.storageDir);
+
     this._initialized = true;
   }
 
@@ -160,6 +201,11 @@ export class PersistentFileSessionService extends InMemorySessionService {
         await fs.unlink(filePath);
       } catch (err) {
         // Ignore deletion errors if file doesn't exist
+      }
+      if (this.legacyStorageDir) {
+        try {
+          await fs.unlink(path.join(this.legacyStorageDir, fileName));
+        } catch {}
       }
     }
   }
@@ -334,7 +380,6 @@ export class PersistentFileSessionService extends InMemorySessionService {
         let portionFailed = false;
 
         for (const portionText of portions) {
-          const baseUrl = getOllamaBaseUrl();
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 30000);
 
@@ -345,28 +390,15 @@ export class PersistentFileSessionService extends InMemorySessionService {
               console.log(pc.yellow(`\nAsking model ${pc.bold(modelName)} to minimize and compress ${role} message (${(portionText.length / 1024).toFixed(1)} KB)...`));
             }
 
-            const response = await fetch(`${baseUrl}/api/chat`, {
+            const reqConfig = buildMinimizationRequest(
+              modelName,
+              `You are a highly efficient assistant. Your task is to compress and minimize the following ${role} message from a conversation history. Retain all key technical instructions, completed tasks, file paths, code changes, and core queries, but compress the content to be extremely dense, short, and compact to save token space. Respond ONLY with the minimized content. Do not include introductory or concluding conversational filler.`,
+              portionText
+            );
+            const response = await fetch(reqConfig.url, {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                model: modelName,
-                messages: [
-                  {
-                    role: 'system',
-                    content: `You are a highly efficient assistant. Your task is to compress and minimize the following ${role} message from a conversation history. Retain all key technical instructions, completed tasks, file paths, code changes, and core queries, but compress the content to be extremely dense, short, and compact to save token space. Respond ONLY with the minimized content. Do not include introductory or concluding conversational filler.`
-                  },
-                  {
-                    role: 'user',
-                    content: portionText
-                  }
-                ],
-                stream: false,
-                options: {
-                  temperature: 0.3
-                }
-              }),
+              headers: reqConfig.headers,
+              body: reqConfig.body,
               signal: controller.signal
             });
 
@@ -396,34 +428,20 @@ export class PersistentFileSessionService extends InMemorySessionService {
 
         if (!portionFailed && portionSummaries.length > 0) {
           if (portionSummaries.length > 1) {
-            const baseUrl = getOllamaBaseUrl();
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 30000);
 
             try {
               console.log(pc.yellow(`\nAsking model ${pc.bold(modelName)} to synthesize ${portionSummaries.length} portion summaries for this message...`));
-              const response = await fetch(`${baseUrl}/api/chat`, {
+              const reqConfig = buildMinimizationRequest(
+                modelName,
+                'You are a highly efficient assistant. Your task is to synthesize the following summaries of parts of a single message into a single, cohesive, highly dense, unified minimized message. Preserve all key technical facts, decisions, and instructions. Respond ONLY with the unified minimized message.',
+                portionSummaries.join('\n\n---\n\n')
+              );
+              const response = await fetch(reqConfig.url, {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  model: modelName,
-                  messages: [
-                    {
-                      role: 'system',
-                      content: 'You are a highly efficient assistant. Your task is to synthesize the following summaries of parts of a single message into a single, cohesive, highly dense, unified minimized message. Preserve all key technical facts, decisions, and instructions. Respond ONLY with the unified minimized message.'
-                    },
-                    {
-                      role: 'user',
-                      content: portionSummaries.join('\n\n---\n\n')
-                    }
-                  ],
-                  stream: false,
-                  options: {
-                    temperature: 0.3
-                  }
-                }),
+                headers: reqConfig.headers,
+                body: reqConfig.body,
                 signal: controller.signal
               });
 

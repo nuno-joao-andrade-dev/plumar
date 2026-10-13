@@ -47,8 +47,10 @@ export function adkContentsToOllamaMessages(contents, systemInstruction) {
         }
         if (part.functionCall) {
           callCounter++;
-          const callId = `call_${part.functionCall.name}_${callCounter}`;
-          toolCallMap.set(part.functionCall.name, callId);
+          const callId = part.functionCall.id || `call_${part.functionCall.name}_${callCounter}`;
+          const queue = toolCallMap.get(part.functionCall.name) || [];
+          queue.push(callId);
+          toolCallMap.set(part.functionCall.name, queue);
           toolCalls.push({
             id: callId,
             type: 'function',
@@ -70,7 +72,8 @@ export function adkContentsToOllamaMessages(contents, systemInstruction) {
       for (const part of parts) {
         if (part.functionResponse) {
           const name = part.functionResponse.name;
-          let callId = toolCallMap.get(name);
+          const queue = toolCallMap.get(name);
+          let callId = part.functionResponse.id || (queue && queue.length > 0 ? queue.shift() : null);
           if (!callId) {
             callCounter++;
             callId = `call_${name}_${callCounter}`;
@@ -198,8 +201,9 @@ export function adkToolsToOllamaTools(adkTools) {
   return ollamaTools.length > 0 ? ollamaTools : undefined;
 }
 
-// Helper to parse standard and relaxed JS-object-like/JSON strings (e.g. from LMStudio)
-function parseRelaxedJson(str) {
+// Helper to parse standard and relaxed JS-object-like/JSON strings (e.g. from Gemma 4 <|tool_call> or LMStudio)
+export function parseRelaxedJson(str) {
+  if (!str || typeof str !== 'string') return {};
   str = str.trim();
   if (!str) return {};
 
@@ -209,24 +213,54 @@ function parseRelaxedJson(str) {
     // Standard parsing failed; try to repair relaxed JSON
   }
 
+  const stringLiterals = [];
   let repaired = str;
-  // Quote unquoted keys (letters, numbers, underscore, dash followed by a colon)
-  repaired = repaired.replace(/([{,]\s*)([a-zA-Z0-9_-]+)\s*:/g, '$1"$2":');
-  // Map single quotes around string literals to double quotes
-  repaired = repaired.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"');
+
+  // 1. Extract Gemma 4 <|"|>...<|"|> delimited string literals first (supports multi-line code and unescaped quotes inside)
+  if (repaired.includes('<|"|>')) {
+    repaired = repaired.replace(/<\|"\|>([\s\S]*?)<\|"\|>/g, (_, inner) => {
+      const idx = stringLiterals.length;
+      stringLiterals.push(JSON.stringify(inner));
+      return `"__PLUMAR_STR_${idx}__"`;
+    });
+  } else {
+    // Protect existing double-quoted and single-quoted string literals with placeholders before quoting keys
+    repaired = repaired.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, (match) => {
+      const idx = stringLiterals.length;
+      if (match.startsWith("'")) {
+        const inner = match.slice(1, -1).replace(/\\'/g, "'");
+        stringLiterals.push(JSON.stringify(inner));
+      } else {
+        stringLiterals.push(match);
+      }
+      return `"__PLUMAR_STR_${idx}__"`;
+    });
+  }
+
+  // 2. Quote unquoted keys (letters, numbers, underscore, dash, dot followed by a colon)
+  repaired = repaired.replace(/([{,]\s*)([a-zA-Z0-9_.-]+)\s*:/g, '$1"$2":');
+  // Remove trailing commas before closing brace/bracket
+  repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+
+  // 3. Restore string literal placeholders
+  repaired = repaired.replace(/"__PLUMAR_STR_(\d+)__"/g, (_, idxStr) => {
+    return stringLiterals[Number(idxStr)];
+  });
 
   try {
     return JSON.parse(repaired);
   } catch (e2) {
-    // Last-resort regex-based key-value extractor for basic arguments
+    // Last-resort regex-based key-value extractor for basic or truncated arguments
     const obj = {};
-    const kvRegex = /([a-zA-Z0-9_-]+)\s*:\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[0-9.]+|true|false|null)/g;
+    const kvRegex = /([a-zA-Z0-9_.-]+)\s*:\s*(<\|"\|>[\s\S]*?<\|"\|>|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[0-9.]+|true|false|null)/g;
     let kvMatch;
     while ((kvMatch = kvRegex.exec(str)) !== null) {
       const key = kvMatch[1];
       let valStr = kvMatch[2].trim();
       let val;
-      if (valStr.startsWith('"') && valStr.endsWith('"')) {
+      if (valStr.startsWith('<|"|>') && valStr.endsWith('<|"|>')) {
+        val = valStr.slice(5, -5);
+      } else if (valStr.startsWith('"') && valStr.endsWith('"')) {
         val = valStr.slice(1, -1);
       } else if (valStr.startsWith("'") && valStr.endsWith("'")) {
         val = valStr.slice(1, -1);
@@ -254,19 +288,20 @@ function parseRelaxedJson(str) {
 // Text-based fallback tool calls detector and parser
 export function detectAndParseTextToolCalls(text, contents = null, thoughtText = null, isSubCall = false) {
   const foundCalls = [];
-  if (!text) return { text, calls: foundCalls };
+  if (!text && !thoughtText) return { text: text || '', calls: foundCalls };
 
-  let tempText = text;
+  let tempText = text || '';
+  const sourceText = tempText;
 
   // 1. Match <tool_call name="tool_name">arguments</tool_call>
   const toolCallTagRegex = /<tool_call\s+name=["']([^"']+)["']\s*>([\s\S]*?)<\/tool_call>/gi;
   let match;
-  while ((match = toolCallTagRegex.exec(text)) !== null) {
+  while ((match = toolCallTagRegex.exec(sourceText)) !== null) {
     const name = match[1].trim();
     const rawArgs = match[2].trim();
     let args = {};
     try {
-      args = JSON.parse(rawArgs);
+      args = parseRelaxedJson(rawArgs);
       if (args && typeof args === 'object') {
         if (args.arguments && typeof args.arguments === 'object') {
           args = args.arguments;
@@ -282,12 +317,12 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     foundCalls.push({ name, args, rawMatch: match[0] });
   }
 
-  // 1.2 Match Qwen-style <tool_call>{"name": "tool_name", "arguments": ...}</tool_call>
-  const qwenToolCallRegex = /<tool_call\s*>([\s\S]*?)<\/tool_call>/gi;
-  while ((match = qwenToolCallRegex.exec(text)) !== null) {
+  // 1.2 Match Qwen/Gemma JSON-style <tool_call>{"name": "tool_name", "arguments": ...}</tool_call> or <|tool_call>{...}<tool_call|>
+  const qwenToolCallRegex = /<\|?tool_call\|?\s*>(\s*\{[\s\S]*?\}\s*)(?:<\/tool_call>|<\|?tool_call\|?>)(?:\s*<\|?tool_response\|?>)*/gi;
+  while ((match = qwenToolCallRegex.exec(sourceText)) !== null) {
     const rawContent = match[1].trim();
     try {
-      const parsed = JSON.parse(rawContent);
+      const parsed = parseRelaxedJson(rawContent);
       if (parsed && typeof parsed === 'object') {
         const toolName = parsed.name || parsed.tool;
         if (toolName && typeof toolName === 'string') {
@@ -303,15 +338,14 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     }
   }
 
-
   // 2. Match <call_tool_name>arguments</call_tool_name>
   const callTagRegex = /<call_([a-zA-Z0-9_-]+)>([\s\S]*?)<\/call_\1>/gi;
-  while ((match = callTagRegex.exec(text)) !== null) {
+  while ((match = callTagRegex.exec(sourceText)) !== null) {
     const name = match[1].trim();
     const rawArgs = match[2].trim();
     let args = {};
     try {
-      args = JSON.parse(rawArgs);
+      args = parseRelaxedJson(rawArgs);
       if (args && typeof args === 'object') {
         if (args.arguments && typeof args.arguments === 'object') {
           args = args.arguments;
@@ -325,9 +359,9 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     foundCalls.push({ name, args, rawMatch: match[0] });
   }
 
-  // 2.6 Match LMStudio/asymmetric style <|tool_call>call:tool_name{arguments}<tool_call|>
-  const lmStudioRegex = /<\|tool_call\s*>\s*call:([a-zA-Z0-9_-]+)\s*([\s\S]*?)(?:<tool_call\|>|<\|tool_call\|>|<\/tool_call>)/gi;
-  while ((match = lmStudioRegex.exec(text)) !== null) {
+  // 2.6 Match Gemma 4 / LMStudio style <|tool_call>call:tool_name{arguments}<tool_call|><|tool_response>
+  const lmStudioRegex = /(?:<\|?tool_call\|?\s*>\s*)?call:([a-zA-Z0-9_-]+)\s*(\{[\s\S]*?\})\s*(?:<tool_call\|>|<\|tool_call\|>|<\/tool_call>|<\|?tool_response\|?>)(?:\s*<\|?tool_response\|?>)*/gi;
+  while ((match = lmStudioRegex.exec(sourceText)) !== null) {
     const name = match[1].trim();
     const rawArgs = match[2].trim();
     let args = {};
@@ -339,15 +373,29 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     foundCalls.push({ name, args, rawMatch: match[0] });
   }
 
+  // 2.6b Fallback for unclosed <|tool_call>call:tool_name{arguments} at end of output
+  if (foundCalls.length === 0) {
+    const unclosedGemmaCallRegex = /<\|?tool_call\|?\s*>\s*call:([a-zA-Z0-9_-]+)\s*(\{[\s\S]*\})\s*$/gi;
+    while ((match = unclosedGemmaCallRegex.exec(sourceText)) !== null) {
+      const name = match[1].trim();
+      const rawArgs = match[2].trim();
+      let args = {};
+      try {
+        args = parseRelaxedJson(rawArgs);
+      } catch (e) {}
+      foundCalls.push({ name, args, rawMatch: match[0] });
+    }
+  }
+
   // 2.5 Match <function=tool_name>arguments</tool_call> or <function=tool_name>arguments</function>
   const functionTagRegex = /<function=["']?([a-zA-Z0-9_-]+)["']?\s*>([\s\S]*?)(?:<\/function>|<\/tool_call>)/gi;
-  while ((match = functionTagRegex.exec(text)) !== null) {
+  while ((match = functionTagRegex.exec(sourceText)) !== null) {
     const name = match[1].trim();
     const rawArgs = match[2].trim();
     let args = {};
     try {
       if (rawArgs && rawArgs.trim()) {
-        args = JSON.parse(rawArgs);
+        args = parseRelaxedJson(rawArgs);
         if (args && typeof args === 'object') {
           if (args.arguments && typeof args.arguments === 'object') {
             args = args.arguments;
@@ -363,14 +411,15 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     }
     foundCalls.push({ name, args, rawMatch: match[0] });
   }
+
   // 2.7 Match tool call tag style [Agent Tool Call: "tool_name" with args: {arguments}] (Ignore "Executed" which indicates past logs)
   const agentToolCallRegex = /\[Agent Tool Call:\s*(?!Executed\b)["']?([a-zA-Z0-9_-]+)["']?\s*(?:with\s+args:|args:)?\s*(\{[\s\S]*?\})\]/gi;
-  while ((match = agentToolCallRegex.exec(text)) !== null) {
+  while ((match = agentToolCallRegex.exec(sourceText)) !== null) {
     const name = match[1].trim();
     const rawArgs = match[2].trim();
     let args = {};
     try {
-      args = JSON.parse(rawArgs);
+      args = parseRelaxedJson(rawArgs);
     } catch (e) {
       // Ignore invalid parsing
     }
@@ -379,7 +428,7 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
 
   // 3. Match markdown JSON/raw code blocks
   const markdownRegex = /```(?:json)?\s*([\s\S]*?)```/gi;
-  while ((match = markdownRegex.exec(text)) !== null) {
+  while ((match = markdownRegex.exec(sourceText)) !== null) {
     const blockContent = match[1].trim();
     try {
       const parsed = JSON.parse(blockContent);
@@ -413,7 +462,7 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
 
   // 4. Try parsing the entire text if it's a raw JSON object
   if (foundCalls.length === 0) {
-    const trimmed = text.trim();
+    const trimmed = sourceText.trim();
     if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
       try {
         const obj = JSON.parse(trimmed);
@@ -431,20 +480,20 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
 
   // 5. Intelligent recovery: If model outputs a canned refusal claiming it cannot run background processes or execute commands on the machine,
   // but provided or was previously given the commands and directories, intercept and execute them!
-  if (foundCalls.length === 0 && !isSubCall) {
-    const recoveredCalls = extractRefusedBackgroundCommands(text, contents);
+  if (foundCalls.length === 0 && !isSubCall && sourceText) {
+    const recoveredCalls = extractRefusedBackgroundCommands(sourceText, contents);
     if (recoveredCalls.length > 0) {
       foundCalls.push(...recoveredCalls);
       tempText = '';
     }
   }
 
-  // 6. Execute Thinking Process: If executeThinking is enabled or if the model hallucinated execution,
+  // 6. Execute Thinking Process: If executeThinking is enabled in settings (or if the model hallucinated execution),
   // extract intended tool calls or commands from the thinking process!
   if (foundCalls.length === 0 && !isSubCall && thoughtText) {
-    const isExecutionHallucination = /(?:i have executed|i've executed|status:\s*the process.*is running|started the (?:server|backend|frontend)|has been (?:started|executed) in the background)/i.test(text);
+    const isExecutionHallucination = /(?:i have executed|i've executed|status:\s*the process.*is running|started the (?:server|backend|frontend)|has been (?:started|executed) in the background)/i.test(sourceText);
     if (isExecuteThinkingEnabled() || isExecutionHallucination) {
-      const thinkingCalls = extractThinkingProcessToolCalls(thoughtText, text, contents);
+      const thinkingCalls = extractThinkingProcessToolCalls(thoughtText, sourceText, contents);
       if (thinkingCalls.length > 0) {
         foundCalls.push(...thinkingCalls);
         tempText = '';
@@ -455,8 +504,8 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
   // 7. Intelligent recovery: If model claims it cannot inspect/modify files outside specific files
   // or tells user to manually review/check/fix a file (e.g. app.module.ts, package.json),
   // intercept and automatically dispatch findFiles to locate the file in the workspace!
-  if (foundCalls.length === 0 && !isSubCall && text) {
-    const fileRefusalCalls = extractRefusedFileInvestigations(text);
+  if (foundCalls.length === 0 && !isSubCall && sourceText) {
+    const fileRefusalCalls = extractRefusedFileInvestigations(sourceText);
     if (fileRefusalCalls.length > 0) {
       foundCalls.push(...fileRefusalCalls);
       tempText = '';
@@ -470,8 +519,14 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     }
   }
 
+  // Strip any residual special tool/thought delimiter tokens
+  tempText = tempText
+    .replace(/<\|?tool_response\|?>/gi, '')
+    .replace(/<\|?tool_call\|?>/gi, '')
+    .trim();
+
   return {
-    text: tempText.trim(),
+    text: tempText,
     calls: foundCalls
   };
 }
@@ -653,10 +708,26 @@ export function extractThinkingProcessToolCalls(thoughtText, text = '', contents
   if (!thoughtText || typeof thoughtText !== 'string') return [];
   const calls = [];
 
-  // 1. Try standard text tool call parsing on thoughtText itself (JSON blocks, tags)
+  // 1. Try standard text tool call parsing on thoughtText itself (JSON blocks, <|tool_call> tags, etc.)
   const standardCalls = detectAndParseTextToolCalls(thoughtText, null, null, true);
   if (standardCalls && standardCalls.calls && standardCalls.calls.length > 0) {
     return standardCalls.calls;
+  }
+
+  // 1.5. Match inline function-call expressions like toolName({ ... }) inside thoughtText
+  const inlineFnRegex = /\b([a-zA-Z0-9_]+)\s*\(\s*(\{[\s\S]*?\})\s*\)/g;
+  let fnMatch;
+  while ((fnMatch = inlineFnRegex.exec(thoughtText)) !== null) {
+    const toolName = fnMatch[1].trim();
+    if (tools[toolName]) {
+      try {
+        const args = parseRelaxedJson(fnMatch[2]);
+        calls.push({ name: toolName, args, rawMatch: fnMatch[0] });
+      } catch (e) {}
+    }
+  }
+  if (calls.length > 0) {
+    return calls;
   }
 
   // 2. Direct commands from thoughtText
@@ -712,6 +783,21 @@ export function extractThinkingProcessToolCalls(thoughtText, text = '', contents
     }
   }
 
+  // 3.5. Mentions of restClient or HTTP requests (GET, POST, PUT, DELETE, PATCH) against a URL in thoughtText
+  if (/\brestClient\b|(?:perform|make|send|test|issue)\s+(?:a\s+)?(?:GET|POST|PUT|DELETE|PATCH)\s+request/i.test(thoughtText)) {
+    const urlMatch = thoughtText.match(/https?:\/\/[^\s`"')>\]}]+/i);
+    if (urlMatch) {
+      const url = urlMatch[0].replace(/[.,;]+$/, '');
+      const methodMatch = thoughtText.match(/\b(GET|POST|PUT|DELETE|PATCH)\b/i);
+      const method = methodMatch ? methodMatch[1].toUpperCase() : 'GET';
+      return [{
+        name: 'restClient',
+        args: { method, url },
+        rawMatch: urlMatch[0]
+      }];
+    }
+  }
+
   // 4. Hallucinated execution recovery (e.g. model claiming it executed commands)
   const isExecutionHallucination = /(?:i have executed|i've executed|status:\s*the process.*is running|started the (?:server|backend|frontend)|has been (?:started|executed) in the background)/i.test(text);
   if (isExecutionHallucination) {
@@ -746,9 +832,16 @@ export function extractThinkingProcessToolCalls(thoughtText, text = '', contents
 export function hasActionableThinkingPlan(thoughtText, text = '') {
   if (!thoughtText || typeof thoughtText !== 'string') return false;
   
-  // Explicit mentions of tool names
-  const hasToolMentions = /(?:executeCommand|writeFile|makeDirectory|codeFixer|searchReplace|searchGrep|findFiles|readFile|processManager|portManager)/i.test(thoughtText);
+  // Explicit mentions of any registered tool name
+  const toolNames = Object.keys(tools);
+  const hasToolMentions = toolNames.some(name => new RegExp(`\\b${name}\\b`, 'i').test(thoughtText)) ||
+    /(?:executeCommand|writeFile|makeDirectory|codeFixer|searchReplace|searchGrep|findFiles|readFile|processManager|portManager|restClient|apiPerformanceTest|fetchWebPage|gitHelper|dbExplorer|codeFormatter|dependencyScanner|regexHelper)/i.test(thoughtText);
   if (hasToolMentions) return true;
+
+  // Mentions of HTTP/API requests or endpoint testing
+  if (/(?:(?:GET|POST|PUT|DELETE|PATCH)\s+request|https?:\/\/localhost[:/]|test\s+the\s+(?:proxy|api|endpoint|server))/i.test(thoughtText)) {
+    return true;
+  }
 
   // Mentions of shell commands, background setup, servers, or dependencies
   const hasCommandIntent = /(?:(?:run|execute|launch|start|install|build|serve)\s+(?:the\s+)?(?:command|service|server|process|backend|frontend|client|script|dependencies|packages)|(?:npm|yarn|pnpm|bun|node|npx|python|python3|cargo|go)\s+[a-z0-9_\-\.\/]+|`[^`]*(?:npm|node|npx|python|cargo|go|cd|install|run|start|serve)[^`]*`)/i.test(thoughtText);
@@ -804,23 +897,30 @@ export function extractRefusedFileInvestigations(text) {
   }
 
   if (matchedFile) {
-    // If the matched file exists directly on disk, read it directly!
-    if (fs.existsSync(matchedFile)) {
+    const cwd = process.cwd();
+    const resolvedPath = path.resolve(cwd, matchedFile);
+    const cwdWithSep = cwd.endsWith(path.sep) ? cwd : cwd + path.sep;
+    const isWithinCwd = resolvedPath === cwd || resolvedPath.startsWith(cwdWithSep);
+
+    // If the matched file exists directly on disk within cwd, read it directly!
+    if (isWithinCwd && fs.existsSync(resolvedPath)) {
       calls.push({
         name: 'readFile',
-        args: { filePath: matchedFile }
+        args: { filePath: path.relative(cwd, resolvedPath) || resolvedPath }
       });
       return calls;
     }
 
     const baseName = path.basename(matchedFile);
     const parentDir = path.dirname(matchedFile);
+    const resolvedParent = path.resolve(cwd, parentDir);
+    const isParentWithinCwd = resolvedParent === cwd || resolvedParent.startsWith(cwdWithSep);
 
-    // If parent directory exists on disk, list files in that directory to reveal actual files
-    if (parentDir && parentDir !== '.' && fs.existsSync(parentDir)) {
+    // If parent directory exists on disk within cwd, list files in that directory
+    if (isParentWithinCwd && parentDir && parentDir !== '.' && fs.existsSync(resolvedParent)) {
       calls.push({
         name: 'listFiles',
-        args: { directory: parentDir }
+        args: { directory: path.relative(cwd, resolvedParent) || '.' }
       });
       return calls;
     }
@@ -897,6 +997,305 @@ export function startSpinner(message) {
   };
 }
 
+/**
+ * Strips the redundant markdown "### Available Tools & Parameter Schemas" block
+ * from the system prompt when native tool schemas are already passed via `requestPayload.tools`.
+ */
+export function stripRedundantToolSchemasFromPrompt(prompt) {
+  if (!prompt || typeof prompt !== 'string') return prompt;
+  return prompt.replace(/\n*### Available Tools & Parameter Schemas\b[\s\S]*?(?=\n#{2,3}\s|$)/, '').trim();
+}
+
+/**
+ * Reads an NDJSON (Ollama) or SSE (LM Studio / OpenAI) ReadableStream response
+ * and aggregates tokens, thinking/reasoning, tool_calls, and token usage metrics.
+ */
+export async function readStreamingResponse(bodyStream, provider = 'ollama', onToken = null) {
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let content = '';
+  let thinking = '';
+  const toolCalls = [];
+  const images = [];
+  let promptEvalCount;
+  let evalCount;
+  let usage;
+  let error = null;
+
+  const processLine = (rawLine) => {
+    let line = rawLine.trim();
+    if (!line) return;
+    if (line.startsWith('data:')) {
+      line = line.slice(5).trim();
+      if (line === '[DONE]') return;
+    }
+    let chunk;
+    try {
+      chunk = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (chunk.error) {
+      error = chunk.error;
+      return;
+    }
+
+    // Ollama NDJSON format
+    if (chunk.message) {
+      const msg = chunk.message;
+      const deltaContent = msg.content || '';
+      const deltaThinking = msg.thinking || msg.reasoning || msg.reasoning_content || '';
+      if (deltaContent) content += deltaContent;
+      if (deltaThinking) thinking += deltaThinking;
+      if (onToken && (deltaContent || deltaThinking)) {
+        onToken(deltaContent, deltaThinking);
+      }
+      if (Array.isArray(msg.tool_calls)) {
+        for (const tc of msg.tool_calls) {
+          toolCalls.push(tc);
+        }
+      }
+      if (Array.isArray(msg.images)) {
+        images.push(...msg.images);
+      }
+    }
+
+    // OpenAI / LM Studio SSE format
+    if (Array.isArray(chunk.choices) && chunk.choices.length > 0) {
+      const choice = chunk.choices[0];
+      const delta = choice.delta || choice.message || {};
+      const deltaContent = delta.content || '';
+      const deltaThinking = delta.reasoning || delta.reasoning_content || delta.thinking || '';
+      if (deltaContent) content += deltaContent;
+      if (deltaThinking) thinking += deltaThinking;
+      if (onToken && (deltaContent || deltaThinking)) {
+        onToken(deltaContent, deltaThinking);
+      }
+      if (Array.isArray(delta.tool_calls)) {
+        for (const tc of delta.tool_calls) {
+          const idx = typeof tc.index === 'number' ? tc.index : toolCalls.length;
+          if (!toolCalls[idx]) {
+            toolCalls[idx] = {
+              id: tc.id || `call_${idx}`,
+              type: 'function',
+              function: {
+                name: tc.function?.name || '',
+                arguments: tc.function?.arguments || ''
+              }
+            };
+          } else {
+            if (tc.function?.name) toolCalls[idx].function.name += tc.function.name;
+            if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
+          }
+        }
+      }
+    }
+
+    if (typeof chunk.prompt_eval_count === 'number') promptEvalCount = chunk.prompt_eval_count;
+    if (typeof chunk.eval_count === 'number') evalCount = chunk.eval_count;
+    if (chunk.done_reason) doneReason = chunk.done_reason;
+    if (chunk.usage) usage = chunk.usage;
+  };
+
+  let doneReason;
+
+  if (bodyStream && typeof bodyStream.getReader === 'function') {
+    const reader = bodyStream.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += typeof value === 'string' ? value : decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || '';
+        for (const l of lines) {
+          processLine(l);
+        }
+      }
+      if (buffer.trim()) {
+        processLine(buffer);
+      }
+    } finally {
+      reader.releaseLock?.();
+    }
+  } else if (bodyStream && Symbol.asyncIterator in bodyStream) {
+    for await (const chunk of bodyStream) {
+      buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+      for (const l of lines) {
+        processLine(l);
+      }
+    }
+    if (buffer.trim()) {
+      processLine(buffer);
+    }
+  }
+
+  if (error) {
+    return { error };
+  }
+
+  const assembledMessage = {
+    role: 'assistant',
+    content,
+    ...(thinking ? { thinking } : {}),
+    ...(toolCalls.filter(Boolean).length > 0 ? { tool_calls: toolCalls.filter(Boolean) } : {}),
+    ...(images.length > 0 ? { images } : {})
+  };
+
+  if (provider === 'lmstudio') {
+    return {
+      choices: [{ message: assembledMessage, ...(doneReason ? { finish_reason: doneReason } : {}) }],
+      ...(doneReason ? { done_reason: doneReason } : {}),
+      usage
+    };
+  }
+
+  return {
+    message: assembledMessage,
+    prompt_eval_count: promptEvalCount,
+    eval_count: evalCount,
+    ...(doneReason ? { done_reason: doneReason } : {}),
+    usage
+  };
+}
+
+async function parseResponseOrStream(response, provider, onToken = null) {
+  const contentType = response?.headers?.get?.('content-type') || '';
+  const isStreamHeader = contentType.includes('application/x-ndjson') || contentType.includes('text/event-stream');
+  if ((isStreamHeader || typeof response.json !== 'function') && response?.body) {
+    return await readStreamingResponse(response.body, provider, onToken);
+  }
+  return await response.json();
+}
+
+const sessionContextTokensMap = new Map();
+
+/**
+ * Compacts older tool outputs, large historical file-write tool_calls arguments,
+ * and older intermediate steps when total prompt tokens approach `numCtx`, ensuring
+ * at least `minOutputHeadroom` tokens remain available in Ollama's KV cache so
+ * responses are never truncated mid-sentence (`done_reason: "length"`).
+ */
+export function compactMessagesForContextHeadroom(messages, numCtx = 16384, toolsList = null, lastKnownTokens = 0, forceCompact = false) {
+  if (!Array.isArray(messages) || messages.length === 0) return messages;
+
+  const effectiveCtx = typeof numCtx === 'number' && numCtx > 0 ? numCtx : 16384;
+  const minOutputHeadroom = forceCompact
+    ? Math.min(8192, Math.max(3072, Math.floor(effectiveCtx * 0.3)))
+    : Math.min(6144, Math.max(2048, Math.floor(effectiveCtx * 0.2)));
+  const maxPromptTokens = Math.max(4096, effectiveCtx - minOutputHeadroom);
+
+  const toolsChars = toolsList ? JSON.stringify(toolsList).length : 0;
+  const initialMessagesChars = JSON.stringify(messages).length;
+  // Code + JSON tokenizes at roughly ~2.6 chars per token in Gemma/Llama tokenizers
+  const CHARS_PER_TOKEN = 2.6;
+  const estimatedTokens = Math.ceil((initialMessagesChars + toolsChars) / CHARS_PER_TOKEN);
+  const effectiveTokens = Math.max(estimatedTokens, lastKnownTokens || 0);
+
+  if (!forceCompact && effectiveTokens <= maxPromptTokens) {
+    return messages;
+  }
+
+  const cloned = messages.map(m => ({
+    ...m,
+    ...(Array.isArray(m.tool_calls)
+      ? {
+          tool_calls: m.tool_calls.map(tc => ({
+            ...tc,
+            ...(tc.function ? { function: { ...tc.function } } : {})
+          }))
+        }
+      : {})
+  }));
+
+  const firstUserIdx = cloned.findIndex(m => m.role === 'user');
+  const recentProtected = forceCompact ? 4 : 6;
+  const compactEndIdx = Math.max(firstUserIdx + 1, cloned.length - recentProtected);
+
+  const compactToolArgsObject = (argsObj) => {
+    if (!argsObj || typeof argsObj !== 'object') return argsObj;
+    const copy = Array.isArray(argsObj) ? [...argsObj] : { ...argsObj };
+    for (const k of Object.keys(copy)) {
+      if (typeof copy[k] === 'string' && copy[k].length > 350) {
+        copy[k] = `${copy[k].slice(0, 150)}... [compacted ${copy[k].length} chars in history]`;
+      } else if (copy[k] && typeof copy[k] === 'object') {
+        copy[k] = compactToolArgsObject(copy[k]);
+      }
+    }
+    return copy;
+  };
+
+  // Stage 1 & 2: Condense older thinking blocks, large tool_calls arguments, and older tool outputs
+  for (let i = Math.max(0, firstUserIdx + 1); i < compactEndIdx; i++) {
+    const msg = cloned[i];
+    if (!msg) continue;
+
+    if (msg.role === 'assistant') {
+      if (typeof msg.content === 'string' && msg.content.length > 0) {
+        let c = msg.content.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').trim();
+        if (c.length > 500) {
+          c = c.slice(0, 350) + '\n... [prior assistant step condensed] ...';
+        }
+        msg.content = c;
+      }
+      if (Array.isArray(msg.tool_calls)) {
+        msg.tool_calls = msg.tool_calls.map(tc => {
+          if (!tc?.function?.arguments) return tc;
+          const rawArgs = tc.function.arguments;
+          if (typeof rawArgs === 'string') {
+            if (rawArgs.length > 400) {
+              try {
+                const parsed = JSON.parse(rawArgs);
+                tc.function.arguments = JSON.stringify(compactToolArgsObject(parsed));
+              } catch {
+                tc.function.arguments = rawArgs.slice(0, 200) + '..." [compacted]}';
+              }
+            }
+          } else if (typeof rawArgs === 'object') {
+            tc.function.arguments = compactToolArgsObject(rawArgs);
+          }
+          return tc;
+        });
+      }
+    } else if (msg.role === 'tool') {
+      if (typeof msg.content === 'string' && msg.content.length > 500) {
+        msg.content = msg.content.slice(0, 250) + ' ... [prior tool output condensed] ... ' + msg.content.slice(-150);
+      }
+    }
+  }
+
+  // Stage 3: If still above budget (or if forceCompact / lastKnownTokens requires deeper reduction),
+  // drop oldest intermediate assistant+tool exchange messages between firstUserIdx and recentProtected
+  const maxMessagesChars = Math.max(
+    10000,
+    Math.floor(maxPromptTokens * CHARS_PER_TOKEN) - toolsChars
+  );
+  // If compaction was triggered by Ollama's actual token counter (lastKnownTokens > maxPromptTokens) or forceCompact,
+  // also ensure we reduce message characters by at least 25% so actual KV-cache tokens drop significantly.
+  const targetChars = (forceCompact || lastKnownTokens > maxPromptTokens)
+    ? Math.min(maxMessagesChars, Math.floor(initialMessagesChars * 0.72))
+    : maxMessagesChars;
+
+  const removeStartIdx = firstUserIdx >= 0 ? firstUserIdx + 1 : (cloned[0]?.role === 'system' ? 1 : 0);
+  while (
+    JSON.stringify(cloned).length > targetChars &&
+    cloned.length - recentProtected > removeStartIdx
+  ) {
+    cloned.splice(removeStartIdx, 1);
+    // If we removed an assistant message with tool_calls, also remove its immediate orphaned tool responses
+    while (
+      cloned.length - recentProtected > removeStartIdx &&
+      cloned[removeStartIdx]?.role === 'tool'
+    ) {
+      cloned.splice(removeStartIdx, 1);
+    }
+  }
+
+  return cloned;
+}
+
 // Custom BaseLlm implementation for local/remote Ollama instance
 export class Ollama extends BaseLlm {
   constructor({ model, sessionId, options }) {
@@ -907,6 +1306,7 @@ export class Ollama extends BaseLlm {
   }
 
   async *generateContentAsync(llmRequest, stream = false, abortSignal) {
+    this.lastError = null;
     const activeSignal = abortSignal || this.abortSignal;
     if (isVerboseJsonEnabled()) {
       console.log('ADK llmRequest:', JSON.stringify(llmRequest, null, 2));
@@ -921,12 +1321,30 @@ export class Ollama extends BaseLlm {
       }
     }
 
-    const messages = adkContentsToOllamaMessages(llmRequest.contents || [], systemInstruction);
+    const fullSystemInstruction = systemInstruction;
     const ollamaTools = adkToolsToOllamaTools(llmRequest.config?.tools);
+    // When native tool schemas are passed in requestPayload.tools, strip the redundant markdown
+    // "### Available Tools & Parameter Schemas" block from systemInstruction to save ~4,500 tokens of context.
+    const effectiveSystemInstruction = (ollamaTools && ollamaTools.length > 0)
+      ? stripRedundantToolSchemasFromPrompt(systemInstruction)
+      : systemInstruction;
+    const messages = adkContentsToOllamaMessages(llmRequest.contents || [], effectiveSystemInstruction);
     
     // Map OpenAI formatted messages to Ollama native /api/chat formatted messages
     const ollamaMessages = messages.map(msg => {
       const mappedMsg = { ...msg };
+      if (mappedMsg.role === 'assistant' && typeof mappedMsg.content === 'string') {
+        const thinkMatches = [...mappedMsg.content.matchAll(/<thinking>\s*([\s\S]*?)\s*<\/thinking>/gi)];
+        if (thinkMatches.length > 0) {
+          const extractedThoughts = thinkMatches.map(m => m[1].trim()).filter(Boolean).join('\n\n');
+          if (extractedThoughts) {
+            mappedMsg.thinking = mappedMsg.thinking
+              ? `${mappedMsg.thinking}\n\n${extractedThoughts}`
+              : extractedThoughts;
+          }
+          mappedMsg.content = mappedMsg.content.replace(/<thinking>[\s\S]*?<\/thinking>\s*/gi, '').trim();
+        }
+      }
       if (mappedMsg.tool_calls && Array.isArray(mappedMsg.tool_calls)) {
         mappedMsg.tool_calls = mappedMsg.tool_calls.map(tc => {
           const mappedTc = { ...tc };
@@ -950,13 +1368,41 @@ export class Ollama extends BaseLlm {
     const providerName = provider === 'lmstudio' ? 'LM Studio' : 'Ollama';
 
     const baseUrl = getOllamaBaseUrl();
+    const specLoader = startSpinner(`Inspecting specs for '${this.model}'...`);
+
+    // Inspect model specifications proactively to check architecture and family
+    const modelDetails = await getModelDetails(this.model);
     const modelContextLength = await getModelContextLength(this.model);
-    
+
+    specLoader.stop();
+
+    const hasDraftPredictParam =
+      (typeof modelDetails?.parameters === 'string' && modelDetails.parameters.includes('draft_num_predict')) ||
+      (typeof modelDetails?.details?.parent_model === 'string' && modelDetails.details.parent_model.includes('draft'));
+
     const payloadOptions = {
       num_ctx: modelContextLength,
       num_predict: -1,
+      ...(hasDraftPredictParam ? { draft_num_predict: 0 } : {}),
       ...this.options
     };
+
+    const lastKnownTokens = this.sessionId ? (sessionContextTokensMap.get(this.sessionId) || 0) : 0;
+    const compactedOllamaMessages = compactMessagesForContextHeadroom(
+      ollamaMessages,
+      payloadOptions.num_ctx,
+      ollamaTools,
+      lastKnownTokens
+    );
+    const compactedOpenAiMessages = compactMessagesForContextHeadroom(
+      messages,
+      payloadOptions.num_ctx,
+      ollamaTools,
+      lastKnownTokens
+    );
+    if (this.sessionId && compactedOllamaMessages !== ollamaMessages) {
+      sessionContextTokensMap.delete(this.sessionId);
+    }
 
     let requestUrl;
     let requestPayload;
@@ -969,29 +1415,22 @@ export class Ollama extends BaseLlm {
       requestUrl = `${url}/chat/completions`;
       requestPayload = {
         model: this.model,
-        messages: messages, // Standard OpenAI format
+        messages: compactedOpenAiMessages, // Standard OpenAI format
         tools: ollamaTools,
-        stream: false,
+        stream: Boolean(stream),
         temperature: payloadOptions.temperature ?? llmRequest.config?.temperature ?? 0.7
       };
     } else {
       requestUrl = `${baseUrl}/api/chat`;
       requestPayload = {
         model: this.model,
-        messages: ollamaMessages,
+        messages: compactedOllamaMessages,
         tools: ollamaTools,
-        stream: false,
+        stream: Boolean(stream),
         temperature: payloadOptions.temperature ?? llmRequest.config?.temperature ?? 0.7,
         options: payloadOptions
       };
     }
-    
-    const specLoader = startSpinner(`Inspecting specs for '${this.model}'...`);
-
-    // Inspect model specifications proactively to check architecture and family
-    const modelDetails = await getModelDetails(this.model);
-
-    specLoader.stop();
 
     const familySpec = (modelDetails?.details?.family || '').toLowerCase();
     const familiesSpec = (modelDetails?.details?.families || []).map(f => String(f).toLowerCase());
@@ -1004,6 +1443,10 @@ export class Ollama extends BaseLlm {
         console.log(`[${providerName} ADK] Proactively stripping tools from '${this.model}' based on model specs (family/architecture: gemma2) to prevent freeze/hang.`);
       }
       delete requestPayload.tools;
+      const sysMsg = requestPayload.messages?.find(m => m.role === 'system');
+      if (sysMsg && fullSystemInstruction) {
+        sysMsg.content = fullSystemInstruction;
+      }
     }
 
     if (isVerboseJsonEnabled()) {
@@ -1029,21 +1472,56 @@ export class Ollama extends BaseLlm {
       }
       
       if (!response.ok) {
-        const errText = await response.text();
+        let errText = await response.text();
         const errTextLower = errText.toLowerCase();
-        const hasToolKeyword = errTextLower.includes('tool') || errTextLower.includes('tools') || errTextLower.includes('tool_calls') || errTextLower.includes('messages') || errTextLower.includes('payload') || errTextLower.includes('structure') || errTextLower.includes('role');
-        const hasUnsupportedKeyword = errTextLower.includes('unsupported') || errTextLower.includes('not support') || errTextLower.includes('unknown') || errTextLower.includes('invalid') || errTextLower.includes('disabled') || errTextLower.includes('bad request') || errTextLower.includes('parameter') || errTextLower.includes('structure') || errTextLower.includes('payload');
-        const isToolErr = hasToolKeyword && hasUnsupportedKeyword;
-        if (isToolErr) {
-          fallbackTextMode = true;
-        } else {
-          if (errText.includes('mllama') || errText.includes('unknown model architecture')) {
-            throw new Error(`${providerName} API error: ${response.status} ${response.statusText} - ${errText}\n\nThis error occurs because your local ${providerName} server is outdated and does not support the 'mllama' vision architecture required by '${this.model}'. Please update to the latest version, or switch to a supported text model using the '/model' command (e.g. '/model qwen2.5:latest' or '/model llama3:latest').`);
+
+        // Auto-recover if Ollama fails context initialization due to draft_num_predict / ctx_other or oversized num_ctx
+        const isContextInitErr =
+          errTextLower.includes('llama_init_from_model') ||
+          errTextLower.includes('ctx_other') ||
+          errTextLower.includes('failed to initialize the context') ||
+          errTextLower.includes('out of memory');
+
+        if (isContextInitErr && provider === 'ollama') {
+          requestPayload.options = {
+            ...(requestPayload.options || {}),
+            draft_num_predict: 0,
+            num_ctx: Math.min(requestPayload.options?.num_ctx || 16384, 16384)
+          };
+          const ctxRetryLoader = startSpinner(`Retrying '${this.model}' with safe context parameters...`);
+          try {
+            response = await fetch(requestUrl, {
+              method: 'POST',
+              headers: getOllamaHeaders(),
+              body: JSON.stringify(requestPayload),
+              signal: activeSignal
+            });
+          } finally {
+            ctxRetryLoader.stop();
           }
-          throw new Error(`${providerName} API error: ${response.status} ${response.statusText} - ${errText}`);
+          if (!response.ok) {
+            errText = await response.text();
+          }
+        }
+
+        if (!response.ok) {
+          const retryErrLower = errText.toLowerCase();
+          const hasToolKeyword = retryErrLower.includes('tool') || retryErrLower.includes('tools') || retryErrLower.includes('tool_calls') || retryErrLower.includes('messages') || retryErrLower.includes('payload') || retryErrLower.includes('structure') || retryErrLower.includes('role');
+          const hasUnsupportedKeyword = retryErrLower.includes('unsupported') || retryErrLower.includes('not support') || retryErrLower.includes('unknown') || retryErrLower.includes('invalid') || retryErrLower.includes('disabled') || retryErrLower.includes('bad request') || retryErrLower.includes('parameter') || retryErrLower.includes('structure') || retryErrLower.includes('payload');
+          const isToolErr = hasToolKeyword && hasUnsupportedKeyword;
+          if (isToolErr) {
+            fallbackTextMode = true;
+          } else {
+            if (errText.includes('mllama') || errText.includes('unknown model architecture')) {
+              throw new Error(`${providerName} API error: ${response.status} ${response.statusText} - ${errText}\n\nThis error occurs because your local ${providerName} server is outdated and does not support the 'mllama' vision architecture required by '${this.model}'. Please update to the latest version, or switch to a supported text model using the '/model' command (e.g. '/model qwen2.5:latest' or '/model llama3:latest').`);
+            }
+            throw new Error(`${providerName} API error: ${response.status} ${response.statusText} - ${errText}`);
+          }
+        } else {
+          data = await parseResponseOrStream(response, provider, this.options?.onToken);
         }
       } else {
-        data = await response.json();
+        data = await parseResponseOrStream(response, provider, this.options?.onToken);
         if (data && data.error) {
           const errStr = typeof data.error === 'string' ? data.error.toLowerCase() : '';
           const hasToolKeyword = errStr.includes('tool') || errStr.includes('tools') || errStr.includes('tool_calls') || errStr.includes('messages') || errStr.includes('payload') || errStr.includes('structure') || errStr.includes('role');
@@ -1077,6 +1555,7 @@ export class Ollama extends BaseLlm {
       if (isToolErr) {
         fallbackTextMode = true;
       } else {
+        this.lastError = err;
         throw err;
       }
     }
@@ -1132,7 +1611,7 @@ export class Ollama extends BaseLlm {
           } else {
             cleanedMessages.push({
               role: msg.role,
-              content: msg.content || ''
+              content: (msg.role === 'system' && fullSystemInstruction) ? fullSystemInstruction : (msg.content || '')
             });
           }
         }
@@ -1205,10 +1684,107 @@ export class Ollama extends BaseLlm {
         throw new Error(`${providerName} API error (retry): ${response.status} ${response.statusText} - ${errText}`);
       }
 
-      data = await response.json();
+      data = await parseResponseOrStream(response, provider, this.options?.onToken);
       if (data && data.error) {
         throw new Error(`${providerName} error (retry): ${data.error}`);
       }
+    }
+
+    // Auto-continue if response was truncated mid-sentence by context window / token limit (done_reason === 'length')
+    let doneReason = data?.done_reason || data?.choices?.[0]?.finish_reason;
+    let currentMsg = data?.message || data?.choices?.[0]?.message;
+    let continuationCount = 0;
+    const MAX_LENGTH_CONTINUATIONS = 2;
+
+    while (
+      doneReason === 'length' &&
+      currentMsg &&
+      (!currentMsg.tool_calls || currentMsg.tool_calls.length === 0) &&
+      continuationCount < MAX_LENGTH_CONTINUATIONS &&
+      (!activeSignal || !activeSignal.aborted)
+    ) {
+      continuationCount++;
+      const partialContent = currentMsg.content || '';
+      const compactedBase = compactMessagesForContextHeadroom(
+        requestPayload.messages || [],
+        requestPayload.options?.num_ctx || modelContextLength,
+        requestPayload.tools,
+        0,
+        true
+      );
+      const continuationMessages = [...compactedBase];
+      if (partialContent.trim()) {
+        continuationMessages.push({
+          role: 'assistant',
+          content: partialContent
+        });
+        continuationMessages.push({
+          role: 'user',
+          content: 'Your previous response was cut off mid-sentence due to the context token limit. Continue writing from the exact word where you stopped without repeating what you already wrote, and emit any tool call needed to complete the step.'
+        });
+      } else {
+        continuationMessages.push({
+          role: 'user',
+          content: 'Your previous thinking process reached the token limit before you output your response or tool call. Output your response and invoke the required tool call directly now.'
+        });
+      }
+
+      const contPayload = {
+        ...requestPayload,
+        messages: continuationMessages
+      };
+
+      const contLoader = startSpinner(`Continuing truncated response ('${this.model}')...`);
+      let contResponse;
+      try {
+        contResponse = await fetch(requestUrl, {
+          method: 'POST',
+          headers: getOllamaHeaders(),
+          body: JSON.stringify(contPayload),
+          signal: activeSignal
+        });
+      } catch {
+        break;
+      } finally {
+        contLoader.stop();
+      }
+
+      if (!contResponse || !contResponse.ok) break;
+      const contData = await parseResponseOrStream(contResponse, provider, this.options?.onToken);
+      if (!contData || contData.error) break;
+
+      const contMsg = contData.message || contData.choices?.[0]?.message;
+      if (!contMsg) break;
+
+      const addition = contMsg.content || '';
+      if (partialContent && addition) {
+        const needsSpace = !/\s$/.test(partialContent) && !/^\s/.test(addition) && !/^[.,;:!?)}\]]/.test(addition);
+        currentMsg.content = partialContent + (needsSpace ? ' ' : '') + addition;
+      } else {
+        currentMsg.content = partialContent + addition;
+      }
+
+      if (contMsg.tool_calls && contMsg.tool_calls.length > 0) {
+        currentMsg.tool_calls = contMsg.tool_calls;
+      }
+      const contThinking = contMsg.thinking || contMsg.reasoning || contMsg.reasoning_content;
+      if (contThinking) {
+        currentMsg.thinking = ((currentMsg.thinking || currentMsg.reasoning || '') + '\n' + contThinking).trim();
+      }
+      if (typeof contData.eval_count === 'number') {
+        data.eval_count = (data.eval_count || 0) + contData.eval_count;
+      }
+      if (typeof contData.prompt_eval_count === 'number') {
+        data.prompt_eval_count = contData.prompt_eval_count;
+      }
+      doneReason = contData.done_reason || contData.choices?.[0]?.finish_reason;
+    }
+
+    if (this.sessionId && typeof data?.prompt_eval_count === 'number') {
+      sessionContextTokensMap.set(
+        this.sessionId,
+        data.prompt_eval_count + (typeof data.eval_count === 'number' ? data.eval_count : 0)
+      );
     }
 
     if (isVerboseJsonEnabled()) {
@@ -1320,8 +1896,7 @@ export class Ollama extends BaseLlm {
 
         if (this.sessionId) {
           try {
-            const artifactService = new FileArtifactService(path.join(process.cwd(), '.antigravitycli', 'sessions'));
-            await artifactService.saveArtifact({
+            const artifactPayload = {
               userId: 'default-user',
               sessionId: this.sessionId,
               filename: path.basename(targetPath),
@@ -1331,7 +1906,11 @@ export class Ollama extends BaseLlm {
                   mimeType: extractedMimeType
                 }
               }
-            });
+            };
+            const plumarArtifactService = new FileArtifactService(path.join(process.cwd(), '.plumar', 'sessions'));
+            await plumarArtifactService.saveArtifact(artifactPayload);
+            const legacyArtifactService = new FileArtifactService(path.join(process.cwd(), '.antigravitycli', 'sessions'));
+            await legacyArtifactService.saveArtifact(artifactPayload);
             console.log(`[Ollama ADK] Successfully saved ADK image artifact to session folder for: ${targetPath}`);
           } catch (adkErr) {
             console.error(`[Ollama ADK] Failed to save image artifact via ADK:`, adkErr.message);
@@ -1355,55 +1934,103 @@ export class Ollama extends BaseLlm {
     
     // Parse any reasoning or thinking fields from Ollama (e.g. DeepSeek-R1 or Gemma4 thinking models)
     let combinedThoughtText = '';
-    const reasoningText = message.reasoning || message.reasoning_content || message.thinking;
+    let reasoningText = message.reasoning || message.reasoning_content || message.thinking || '';
+    const nativeToolCalls = message.tool_calls;
+    const textToolCalls = [];
+    const executeThinkingActive = isExecuteThinkingEnabled();
+
     if (reasoningText) {
-      combinedThoughtText = reasoningText.trim();
-      parts.push({
-        text: reasoningText.trim(),
-        thought: true
-      });
+      if (executeThinkingActive) {
+        // When executeThinking is enabled in settings, split on </thinking> or <|thought|>
+        // and extract any tool calls emitted inside the thinking stream.
+        const closeThinkMatch = reasoningText.match(/([\s\S]*?)(?:<\/thinking>|<\|thought\|>|<thought\|>)([\s\S]*)/i);
+        if (closeThinkMatch) {
+          reasoningText = closeThinkMatch[1].replace(/^<thinking>\s*/i, '').trim();
+          const leakedContent = closeThinkMatch[2].trim();
+          if (leakedContent) {
+            text = text ? `${leakedContent}\n${text}` : leakedContent;
+          }
+        }
+
+        if (!nativeToolCalls || nativeToolCalls.length === 0) {
+          const thoughtParsed = detectAndParseTextToolCalls(reasoningText, llmRequest.contents, null, true);
+          if (thoughtParsed.calls.length > 0) {
+            reasoningText = thoughtParsed.text;
+            textToolCalls.push(...thoughtParsed.calls);
+          }
+        }
+
+        reasoningText = reasoningText
+          .replace(/<\/?thinking>/gi, '')
+          .replace(/<\|?tool_response\|?>/gi, '')
+          .replace(/<\|?tool_call\|?>/gi, '')
+          .trim();
+      } else {
+        reasoningText = reasoningText.trim();
+      }
+
+      if (reasoningText) {
+        combinedThoughtText = reasoningText;
+        parts.push({
+          text: reasoningText,
+          thought: true
+        });
+      }
     }
 
-    // Parse Ollama model thinking process tag (<thinking>...</thinking>) inside content and put it into thought part
-    const thinkingMatch = text.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+    // Parse Ollama model thinking process tag (<thinking>...</thinking> or "Thinking Process:" block) inside content
+    const thinkingMatch =
+      text.match(/<thinking>([\s\S]*?)<\/thinking>/i) ||
+      text.match(/^\s*(?:Thinking Process|Thought Process):\s*([\s\S]*?)<\/thinking>/i) ||
+      (!text.includes('<thinking>') && text.includes('</thinking>') ? text.match(/^([\s\S]*?)<\/thinking>/i) : null) ||
+      text.match(/^\s*(?:Thinking Process|Thought Process):[ \t]*\r?\n([\s\S]+)$/i);
+
     if (thinkingMatch) {
-      const thoughtText = thinkingMatch[1].trim();
-      combinedThoughtText = combinedThoughtText ? (combinedThoughtText + '\n' + thoughtText) : thoughtText;
-      parts.push({
-        text: thoughtText,
-        thought: true
-      });
-      text = text.replace(/<thinking>[\s\S]*?<\/thinking>/i, '').trim();
+      let thoughtText = thinkingMatch[1].replace(/^\s*(?:Thinking Process|Thought Process):\s*/i, '').trim();
+      if (executeThinkingActive && (!nativeToolCalls || nativeToolCalls.length === 0)) {
+        const thoughtParsed = detectAndParseTextToolCalls(thoughtText, llmRequest.contents, null, true);
+        if (thoughtParsed.calls.length > 0) {
+          thoughtText = thoughtParsed.text;
+          textToolCalls.push(...thoughtParsed.calls);
+        }
+      }
+      if (thoughtText) {
+        combinedThoughtText = combinedThoughtText ? (combinedThoughtText + '\n' + thoughtText) : thoughtText;
+        parts.push({
+          text: thoughtText,
+          thought: true
+        });
+      }
+      text = text.replace(thinkingMatch[0], '').trim();
     }
     
     // Parse any text-based tool calls if no native tool calls are present
-    const nativeToolCalls = message.tool_calls;
-    const textToolCalls = [];
     if (!nativeToolCalls || nativeToolCalls.length === 0) {
-      const parsed = detectAndParseTextToolCalls(text, llmRequest.contents, combinedThoughtText);
+      const parsed = detectAndParseTextToolCalls(text, llmRequest.contents, textToolCalls.length === 0 ? combinedThoughtText : null);
       text = parsed.text;
       textToolCalls.push(...parsed.calls);
 
-      // Filter out text tool calls that are merely echoing completed tool calls from conversation history
+      // Filter out text tool calls that are merely echoing completed tool calls from the immediate prior step
       if (textToolCalls.length > 0 && Array.isArray(llmRequest.contents) && llmRequest.contents.length > 0) {
         const lastContent = llmRequest.contents[llmRequest.contents.length - 1];
         const hasPrecedingToolResponse = (lastContent.parts || []).some(p => p.functionResponse);
         if (hasPrecedingToolResponse) {
-          // Collect all previous function calls from the conversation history
-          const previousFunctionCalls = [];
-          for (const c of llmRequest.contents) {
-            for (const p of (c.parts || [])) {
-              if (p.functionCall) {
-                previousFunctionCalls.push(p.functionCall);
-              }
-            }
-          }
+          // Only check immediately preceding function calls from the step right before
+          const prevContent = llmRequest.contents.length >= 2 ? llmRequest.contents[llmRequest.contents.length - 2] : null;
+          const immediateCalls = prevContent ? (prevContent.parts || []).filter(p => p.functionCall).map(p => p.functionCall) : [];
           
-          // Filter out text tool calls that match already executed function calls
+          // Never filter out file mutation / write tools (e.g. writeFile, appendFile, searchReplace, codeFixer)
+          const isWriteTool = (name) => ['writeFile', 'writeBinaryFile', 'writeMarkdown', 'appendFile', 'searchReplace', 'codeFixer'].includes(name);
+
           const filteredCalls = [];
           for (const call of textToolCalls) {
+            // Write tools must always execute to ensure files are actually updated
+            if (isWriteTool(call.name)) {
+              filteredCalls.push(call);
+              continue;
+            }
             const callArgsStr = JSON.stringify(call.args || {});
-            const alreadyExecuted = previousFunctionCalls.some(prev => 
+            const alreadyExecuted = immediateCalls.some(prev => 
               prev.name === call.name && JSON.stringify(prev.args || {}) === callArgsStr
             );
             if (!alreadyExecuted) {
@@ -1475,14 +2102,16 @@ export class Ollama extends BaseLlm {
 /**
  * Fetch available models from the local Ollama or LM Studio instance
  * @param {boolean} [detailed=false] If true, returns full model metadata objects. If false, returns model name strings.
+ * @param {string|null} [targetProvider=null] Optional explicit provider ('ollama' | 'lmstudio') to avoid mutating global provider state during concurrent discovery.
  * @returns {Promise<Array<string|object>>} List of model names or model objects
  */
-export async function fetchOllamaModels(detailed = false) {
-  const provider = getLlmProvider();
+export async function fetchOllamaModels(detailed = false, targetProvider = null) {
+  const provider = targetProvider || getLlmProvider();
   const providerName = provider === 'lmstudio' ? 'LM Studio' : 'Ollama';
+  const baseUrl = getOllamaBaseUrl(provider);
+  const headers = getOllamaHeaders(provider);
   const modelsLoader = startSpinner(`Fetching installed models from ${providerName}...`);
   try {
-    const baseUrl = getOllamaBaseUrl();
     let response;
     try {
       if (provider === 'lmstudio') {
@@ -1491,12 +2120,12 @@ export async function fetchOllamaModels(detailed = false) {
           url = url + '/v1';
         }
         response = await fetch(`${url}/models`, {
-          headers: getOllamaHeaders(),
+          headers,
           signal: AbortSignal.timeout(5000)
         });
       } else {
         response = await fetch(`${baseUrl}/api/tags`, {
-          headers: getOllamaHeaders(),
+          headers,
           signal: AbortSignal.timeout(5000)
         });
       }
@@ -1527,7 +2156,6 @@ export async function fetchOllamaModels(detailed = false) {
       return data.models.map(m => m.name);
     }
   } catch (error) {
-    const baseUrl = getOllamaBaseUrl();
     throw new Error(`${providerName} API at ${baseUrl} is unreachable or non-responsive. Please make sure ${providerName} is running and accessible.`);
   }
 }

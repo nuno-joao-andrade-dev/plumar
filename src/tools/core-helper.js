@@ -1,41 +1,79 @@
 import { GoogleGenAI } from '@google/genai';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 export const WORKSPACE_DIR = process.cwd();
 export const INSTALL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
+export function getWorkspaceDir() {
+  return process.cwd();
+}
+
 export const getGenAIClient = () => {
   // Enforce 100% local-only model constraint. External cloud models are disabled.
   return null;
 };
 
+function isInsideDir(targetPath, baseDir) {
+  const baseWithSep = baseDir.endsWith(path.sep) ? baseDir : baseDir + path.sep;
+  return targetPath === baseDir || targetPath.startsWith(baseWithSep);
+}
 
-// Safe path resolver to prevent path traversal outside workspace or user projects
-export function resolveSafePath(relativeOrAbsolutePath, allowProjectsDir = true) {
+// Safe path resolver strictly confined to the current working directory (process.cwd()),
+// including protection against active and dangling symbolic link escapes.
+export function resolveSafePath(relativeOrAbsolutePath) {
   if (!relativeOrAbsolutePath || typeof relativeOrAbsolutePath !== 'string') {
     throw new Error('Access denied: Provided path must be a non-empty string.');
   }
-  const isAbs = path.isAbsolute(relativeOrAbsolutePath);
-  const resolved = path.resolve(WORKSPACE_DIR, relativeOrAbsolutePath);
-  const wsDirWithSep = WORKSPACE_DIR.endsWith(path.sep) ? WORKSPACE_DIR : WORKSPACE_DIR + path.sep;
-  const allowedBase = '/home/nandrade/projects';
-  const allowedBaseWithSep = allowedBase.endsWith(path.sep) ? allowedBase : allowedBase + path.sep;
+  const currentDir = process.cwd();
+  const resolved = path.resolve(currentDir, relativeOrAbsolutePath);
 
-  const inWorkspace = resolved === WORKSPACE_DIR || resolved.startsWith(wsDirWithSep);
-  const inProjects = resolved === allowedBase || resolved.startsWith(allowedBaseWithSep);
+  if (!isInsideDir(resolved, currentDir)) {
+    throw new Error('Access denied: Action not permitted outside workspace directory.');
+  }
 
-  if (isAbs) {
-    if (inWorkspace || (allowProjectsDir && inProjects)) {
-      return resolved;
+  let realCurrentDir = currentDir;
+  try {
+    realCurrentDir = fs.realpathSync(currentDir);
+  } catch {}
+
+  let checkPath = resolved;
+  while (checkPath && checkPath !== path.dirname(checkPath)) {
+    let stat = null;
+    try {
+      stat = fs.lstatSync(checkPath);
+    } catch {
+      stat = null;
     }
-    throw new Error('Access denied: Action not permitted outside workspace directory.');
+
+    if (stat) {
+      try {
+        const realCheckPath = fs.realpathSync(checkPath);
+        if (!isInsideDir(realCheckPath, realCurrentDir) && !isInsideDir(realCheckPath, currentDir)) {
+          throw new Error('Access denied: Action not permitted outside workspace directory.');
+        }
+      } catch (err) {
+        if (err.message.startsWith('Access denied:')) throw err;
+        // Dangling symlink: resolve link target manually and verify confinement
+        if (stat.isSymbolicLink()) {
+          try {
+            const rawTarget = fs.readlinkSync(checkPath);
+            const resolvedTarget = path.resolve(path.dirname(checkPath), rawTarget);
+            if (!isInsideDir(resolvedTarget, realCurrentDir) && !isInsideDir(resolvedTarget, currentDir)) {
+              throw new Error('Access denied: Action not permitted outside workspace directory.');
+            }
+          } catch (linkErr) {
+            if (linkErr.message.startsWith('Access denied:')) throw linkErr;
+            throw new Error('Access denied: Action not permitted outside workspace directory.');
+          }
+        }
+      }
+      break;
+    }
+    checkPath = path.dirname(checkPath);
   }
 
-  // Relative path: must not traverse outside WORKSPACE_DIR
-  if (!inWorkspace) {
-    throw new Error('Access denied: Action not permitted outside workspace directory.');
-  }
   return resolved;
 }
 

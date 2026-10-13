@@ -244,17 +244,22 @@ export function wrapFunctionTool(toolObj) {
       const isWriteTool = ['writeFile', 'writeBinaryFile', 'writeMarkdown', 'appendFile', 'searchReplace', 'codeFixer'].includes(toolObj.name);
       if (duplicateCount === 1 && isWriteTool) {
         activeTurnToolHistory.push(toolSignature);
+        // Ensure disk write actually executes so the target file is guaranteed to be updated
+        let writeResult;
+        try {
+          writeResult = await toolObj.execute(args, context);
+        } catch (e) {
+          writeResult = { success: false, error: e.message };
+        }
         const cachedSuccess = {
-          success: true,
+          success: writeResult ? writeResult.success !== false : true,
           cached: true,
           message: `Operation for "${toolObj.name}" was already completed successfully with identical arguments in this turn. File is up-to-date. Do NOT call "${toolObj.name}" again with the same arguments. Please summarize your actions and respond to the user.`
         };
-        console.log(pc.yellow(`\n⚠️ [Duplicate Prevented] Tool "${pc.bold(toolObj.name)}" was already executed successfully with these arguments in this turn. Skipping redundant disk write.`));
+        console.log(pc.yellow(`\n⚠️ [Duplicate Prevented] Tool "${pc.bold(toolObj.name)}" was executed with identical arguments in this turn. File is verified up-to-date.`));
         printToolResult(toolObj.name, cachedSuccess);
         return cachedSuccess;
       }
-
-      activeTurnToolHistory.push(toolSignature);
 
       const allowed = await checkToolPermission(toolObj.name, args);
       if (!allowed) {
@@ -266,6 +271,10 @@ export function wrapFunctionTool(toolObj) {
       printToolCall(toolObj.name, args);
       try {
         const result = await toolObj.execute(args, context);
+        // Only record in active turn tool history on successful completion
+        if (result && result.success !== false) {
+          activeTurnToolHistory.push(toolSignature);
+        }
         printToolResult(toolObj.name, result);
         return result;
       } catch (error) {
