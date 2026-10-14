@@ -1,6 +1,11 @@
 import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
-import { getLoadedSkills, createSkill as createSkillInManager, createPlugin as createPluginInManager } from '../skills-plugins-manager.js';
+import {
+  getLoadedSkills,
+  findSkillByNameOrKeyword,
+  createSkill as createSkillInManager,
+  createPlugin as createPluginInManager
+} from '../skills-plugins-manager.js';
 
 export const agentTools = {
   listSkills: new FunctionTool({
@@ -27,18 +32,28 @@ export const agentTools = {
 
   loadSkill: new FunctionTool({
     name: 'loadSkill',
-    description: 'Read the detailed instructions, assets, references, and scripts of a loaded custom skill.',
+    description: 'Read the detailed instructions, assets, references, and scripts of a loaded custom or built-in technology skill.',
     parameters: z.object({
-      name: z.string().describe('The name of the skill to load (must match a loaded skill name).')
+      name: z.string().optional().describe('The name or keyword of the skill to load (e.g. "fullstack-web-node", "python-development", "database-sql", "testing-debugging-devops", "systems-compiled-languages").'),
+      skill: z.string().optional().describe('Alias for name.'),
+      skillName: z.string().optional().describe('Alias for name.'),
+      id: z.string().optional().describe('Alias for name.')
     }),
-    execute: async ({ name }) => {
+    execute: async (args = {}) => {
       try {
-        const skills = getLoadedSkills();
-        const skill = skills[name];
-        if (!skill) {
+        const targetName = args.name || args.skill || args.skillName || args.id;
+        if (!targetName) {
           return {
             success: false,
-            error: `Skill "${name}" not found. Use "listSkills" to see available skills.`
+            error: 'Missing required parameter: name. Use "listSkills" to see available skills.'
+          };
+        }
+        const skill = findSkillByNameOrKeyword(targetName);
+        if (!skill) {
+          const available = Object.keys(getLoadedSkills()).join(', ');
+          return {
+            success: false,
+            error: `Skill "${targetName}" not found. Available skills: ${available}`
           };
         }
         return {

@@ -168,8 +168,8 @@ test('Global Chat Modes Settings Suite', async (t) => {
     assert.equal(parsed.maxToolSteps, 40);
 
     // Restore default
-    setMaxToolSteps(25);
-    assert.equal(getMaxToolSteps(), 25);
+    setMaxToolSteps(75);
+    assert.equal(getMaxToolSteps(), 75);
   });
 });
 

@@ -45,5 +45,5 @@
   },
   "autoMinimize": false,
   "executeThinking": true,
-  "maxToolSteps": 25
+  "maxToolSteps": 75
 }

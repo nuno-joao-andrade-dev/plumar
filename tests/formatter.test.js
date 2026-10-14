@@ -228,6 +228,7 @@ Please review it carefully!`;
       assert.deepEqual(received, ['abc']);
     } finally {
       process.stdin.removeListener('data', onData);
+      process.stdin.pause();
     }
   });
 });

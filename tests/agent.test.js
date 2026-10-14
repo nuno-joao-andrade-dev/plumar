@@ -998,6 +998,43 @@ test('Agent Integration Suite (Real-World Use Cases)', async (t) => {
     assert.strictEqual(parsed.calls[0].name, 'executeCommand');
     assert.deepStrictEqual(parsed.calls[0].args, { command: "echo 'nja'" });
   });
+
+  await t.test('Use Case 17: runAgentTurn should auto-inject technology skills without throwing ADK Context variable not found on {VAR} tokens', async () => {
+    const previousFetch = globalThis.fetch;
+    let capturedSystemPrompt = '';
+
+    globalThis.fetch = async (url, options) => {
+      if (url.endsWith('/api/chat')) {
+        const body = JSON.parse(options.body);
+        const firstMsg = body.messages[0];
+        if (firstMsg && firstMsg.role === 'system') {
+          capturedSystemPrompt = firstMsg.content;
+        }
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          message: {
+            role: 'assistant',
+            content: 'I will scaffold the React and Express application for The Mountain.'
+          },
+          prompt_eval_count: 20,
+          eval_count: 10
+        })
+      };
+    };
+
+    try {
+      const res = await runAgentTurn(
+        'test-react-express-skill',
+        'create a react web app with node express in the backend, to allow to reserve tables at restaurant called "The mountain"',
+        'gemma4:e4b',
+        'coder'
+      );
+      assert.ok(res.text.includes('The Mountain'));
+      assert.ok(capturedSystemPrompt.includes('Skill: fullstack-web-node'), 'System prompt should auto-inject fullstack-web-node skill');
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
 });
-
-

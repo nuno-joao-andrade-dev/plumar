@@ -2075,4 +2075,61 @@ test('23. Tool Loop, Parameter Aliases, and Multi-Format Tool Call Parsing', asy
     assert.strictEqual(cmds[0].name, 'executeCommand');
     assert.strictEqual(cmds[0].args.command, 'cd backend && pytest -q');
   });
+
+  await t.test('detectAndParseTextToolCalls: should parse direct XML tool-name tags (<executeCommand>{...}</executeCommand>), child XML tags, and inline toolName({...}) syntax', async () => {
+    // 1. Exact <executeCommand>{...}</executeCommand> format emitted by gemma4:e4b
+    const gemmaDirectXml = `Let's set up the backend first:\n<executeCommand>\n{\n  "command": "mkdir backend && cd backend && npm init -y && npm install express cors",\n  "background": true,\n  "name": "backend-setup"\n}\n</executeCommand>`;
+    const parsedDirect = detectAndParseTextToolCalls(gemmaDirectXml);
+    assert.strictEqual(parsedDirect.calls.length, 1);
+    assert.strictEqual(parsedDirect.calls[0].name, 'executeCommand');
+    assert.deepStrictEqual(parsedDirect.calls[0].args, {
+      command: 'mkdir backend && cd backend && npm init -y && npm install express cors',
+      background: true,
+      name: 'backend-setup'
+    });
+    assert.strictEqual(parsedDirect.text, "Let's set up the backend first:");
+
+    // 2. Direct XML tag with child parameter tags <executeCommand><command>...</command></executeCommand>
+    const childXml = `<executeCommand>\n  <command>cd backend && node index.js</command>\n  <background>true</background>\n  <name>backend-server</name>\n</executeCommand>`;
+    const parsedChildXml = detectAndParseTextToolCalls(childXml);
+    assert.strictEqual(parsedChildXml.calls.length, 1);
+    assert.strictEqual(parsedChildXml.calls[0].name, 'executeCommand');
+    assert.deepStrictEqual(parsedChildXml.calls[0].args, {
+      command: 'cd backend && node index.js',
+      background: true,
+      name: 'backend-server'
+    });
+
+    // 3. Direct XML tag with opening tag attributes (<writeFile filePath="...">...</writeFile>)
+    const attrXml = `<writeFile filePath="backend/index.js">const express = require('express');\nconst app = express();</writeFile>`;
+    const parsedAttrXml = detectAndParseTextToolCalls(attrXml);
+    assert.strictEqual(parsedAttrXml.calls.length, 1);
+    assert.strictEqual(parsedAttrXml.calls[0].name, 'writeFile');
+    assert.deepStrictEqual(parsedAttrXml.calls[0].args, {
+      filePath: 'backend/index.js',
+      content: "const express = require('express');\nconst app = express();"
+    });
+
+    // 4. Snake-case XML tag (<execute_command>{...}</execute_command>)
+    const snakeXml = `<execute_command>{"command": "npm run build", "background": false}</execute_command>`;
+    const parsedSnake = detectAndParseTextToolCalls(snakeXml);
+    assert.strictEqual(parsedSnake.calls.length, 1);
+    assert.strictEqual(parsedSnake.calls[0].name, 'executeCommand');
+    assert.deepStrictEqual(parsedSnake.calls[0].args, {
+      command: 'npm run build',
+      background: false
+    });
+
+    // 5. Inline JS-style function call syntax executeCommand({ ... })
+    const inlineFn = `I will start the backend now:\n\`\`\`js\nexecuteCommand({ command: "cd backend && node index.js", background: true, name: "backend" })\n\`\`\``;
+    const parsedInlineFn = detectAndParseTextToolCalls(inlineFn);
+    assert.strictEqual(parsedInlineFn.calls.length, 1);
+    assert.strictEqual(parsedInlineFn.calls[0].name, 'executeCommand');
+    assert.deepStrictEqual(parsedInlineFn.calls[0].args, {
+      command: 'cd backend && node index.js',
+      background: true,
+      name: 'backend'
+    });
+  });
 });
+

@@ -285,9 +285,68 @@ export function parseRelaxedJson(str) {
   }
 }
 
+const KNOWN_TOOL_PARAM_NAMES = new Set([
+  'command', 'background', 'name', 'waitMs', 'cwd',
+  'filePath', 'TargetFile', 'targetFile', 'path', 'file', 'filename', 'destination',
+  'content', 'CodeContent', 'code', 'text',
+  'findText', 'replaceText', 'oldText', 'newText', 'search', 'replace',
+  'query', 'directory', 'directoryPath', 'dir', 'folder', 'pattern', 'isRegex',
+  'url', 'outputPath', 'method', 'headers', 'body', 'requests', 'concurrency',
+  'expression', 'action', 'font', 'presetShape', 'imagePath', 'imageWidth', 'colored',
+  'prompt', 'modelName', 'processId', 'pid', 'lines', 'port',
+  'flags', 'replacement', 'connectionUri', 'sql', 'title', 'sections', 'encoding'
+]);
+
 /**
- * Parses XML-style parameter tags inside <function=...> or <tool_call> bodies,
- * e.g. <parameter=filePath>index.js</parameter> or <param name="filePath">index.js</param>
+ * Resolves a tool name against registered tools (exact, camelCase from snake_case/kebab-case, or case-insensitive).
+ */
+function resolveRegisteredToolName(rawName) {
+  if (!rawName || typeof rawName !== 'string') return null;
+  const trimmed = rawName.trim().replace(/^call_/i, '');
+  if (tools[trimmed]) return trimmed;
+
+  // Convert snake_case or kebab-case to camelCase (e.g. execute_command -> executeCommand)
+  const camel = trimmed.replace(/[-_]+([a-zA-Z0-9])/g, (_, ch) => ch.toUpperCase());
+  if (tools[camel]) return camel;
+
+  const lower = trimmed.toLowerCase();
+  const camelLower = camel.toLowerCase();
+  for (const key of Object.keys(tools)) {
+    const keyLower = key.toLowerCase();
+    if (keyLower === lower || keyLower === camelLower) {
+      return key;
+    }
+  }
+  return null;
+}
+
+/**
+ * Parses XML attributes from an opening tag attribute string, e.g. filePath="index.js" background="true"
+ */
+function parseXmlAttributes(attrStr) {
+  const attrs = {};
+  if (!attrStr || typeof attrStr !== 'string') return attrs;
+  const attrRegex = /([a-zA-Z_][a-zA-Z0-9_.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/g;
+  let m;
+  while ((m = attrRegex.exec(attrStr)) !== null) {
+    const key = m[1].trim();
+    const rawVal = m[2] !== undefined ? m[2] : (m[3] !== undefined ? m[3] : m[4]);
+    if (rawVal === 'true') attrs[key] = true;
+    else if (rawVal === 'false') attrs[key] = false;
+    else if (rawVal === 'null') attrs[key] = null;
+    else if (/^-?\d+$/.test(rawVal) && (key === 'waitMs' || key === 'port' || key === 'pid' || key === 'lines' || key === 'requests' || key === 'concurrency' || key === 'imageWidth')) {
+      attrs[key] = Number(rawVal);
+    } else {
+      attrs[key] = rawVal;
+    }
+  }
+  return attrs;
+}
+
+/**
+ * Parses XML-style parameter tags inside <function=...>, <tool_call>, or <toolName> bodies,
+ * e.g. <parameter=filePath>index.js</parameter>, <param name="filePath">index.js</param>,
+ * or direct child tags <command>npm test</command><background>true</background>
  */
 function parseXmlParameterTags(rawStr) {
   if (!rawStr || typeof rawStr !== 'string') return null;
@@ -323,7 +382,97 @@ function parseXmlParameterTags(rawStr) {
     params[m[1].trim()] = parseParamValue(m[2]);
   }
 
+  // Style 3: Direct child parameter tags <command>...</command><background>true</background>
+  if (!matched && rawStr.trim().startsWith('<')) {
+    const directChildRegex = /<([a-zA-Z_][a-zA-Z0-9_]*)\s*>([\s\S]*?)<\/\1>/g;
+    while ((m = directChildRegex.exec(rawStr)) !== null) {
+      const tagName = m[1].trim();
+      if (KNOWN_TOOL_PARAM_NAMES.has(tagName)) {
+        matched = true;
+        params[tagName] = parseParamValue(m[2]);
+      }
+    }
+  }
+
   return matched ? params : null;
+}
+
+/**
+ * Parses the inner body (and optional opening-tag attributes) of a tool XML tag such as <executeCommand>...</executeCommand>.
+ */
+function parseToolXmlBodyAndAttributes(toolName, rawArgsStr, rawAttrStr = '') {
+  const attrArgs = parseXmlAttributes(rawAttrStr);
+  let inner = (rawArgsStr || '').trim();
+
+  // Unwrap inner markdown code fence if the model wrote <executeCommand>```json { ... } ```</executeCommand>
+  const fenceMatch = inner.match(/^```(?:json|xml|javascript|js|bash|sh)?\s*([\s\S]*?)\s*```$/i);
+  if (fenceMatch) {
+    inner = fenceMatch[1].trim();
+  }
+
+  if (!inner) {
+    return attrArgs;
+  }
+
+  // 1. Check XML parameter tags (<parameter=...>, <param name=...>, or <command>...</command>)
+  const xmlArgs = parseXmlParameterTags(inner);
+  if (xmlArgs) {
+    return { ...attrArgs, ...xmlArgs };
+  }
+
+  // 2. Check JSON object body
+  if (inner.startsWith('{') || inner.startsWith('[')) {
+    try {
+      const parsed = parseRelaxedJson(inner);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        let unwrapped = parsed;
+        if (parsed.arguments && typeof parsed.arguments === 'object' && !Array.isArray(parsed.arguments)) {
+          unwrapped = parsed.arguments;
+        } else if (parsed.args && typeof parsed.args === 'object' && !Array.isArray(parsed.args)) {
+          unwrapped = parsed.args;
+        } else if (parsed.parameters && typeof parsed.parameters === 'object' && !Array.isArray(parsed.parameters)) {
+          unwrapped = parsed.parameters;
+        }
+        return { ...attrArgs, ...unwrapped };
+      }
+    } catch {}
+  }
+
+  // 3. Fallback when opening tag has attributes and inner body is raw content/command
+  if (Object.keys(attrArgs).length > 0) {
+    if (['writeFile', 'appendFile', 'writeBinaryFile'].includes(toolName) && attrArgs.content === undefined) {
+      return { ...attrArgs, content: inner };
+    }
+    if (toolName === 'executeCommand' && attrArgs.command === undefined) {
+      return { ...attrArgs, command: inner };
+    }
+    return attrArgs;
+  }
+
+  // 4. Plain-text body fallback for single-primary-parameter tools
+  if (toolName === 'executeCommand') {
+    return { command: inner, background: true };
+  }
+  if (toolName === 'readFile' || toolName === 'deleteFile') {
+    return { filePath: inner };
+  }
+  if (toolName === 'makeDirectory') {
+    return { directoryPath: inner };
+  }
+  if (toolName === 'listFiles') {
+    return { directory: inner };
+  }
+  if (toolName === 'findFiles') {
+    return { pattern: inner };
+  }
+  if (toolName === 'fetchWebPage') {
+    return { url: inner };
+  }
+  if (toolName === 'calculator') {
+    return { expression: inner };
+  }
+
+  return attrArgs;
 }
 
 /**
@@ -345,8 +494,19 @@ function normalizeParsedToolCallObject(parsed) {
     target = target.function;
   }
 
-  const toolName = target.name || target.tool || target.function_name || (typeof target.function === 'string' ? target.function : null);
-  if (!toolName || typeof toolName !== 'string') return [];
+  const rawToolName = target.name || target.tool || target.function_name || (typeof target.function === 'string' ? target.function : null);
+
+  // Disambiguate executeCommand argument objects where "name" is the background process name (e.g. "name": "backend-setup")
+  const hasExplicitWrapper = target.arguments !== undefined || target.args !== undefined || target.parameters !== undefined || target.params !== undefined || target.input !== undefined || target.tool !== undefined || target.function !== undefined || target.function_name !== undefined;
+  if (!hasExplicitWrapper && typeof target.command === 'string') {
+    const resolvedTool = rawToolName ? resolveRegisteredToolName(rawToolName) : null;
+    if (!resolvedTool && (target.background !== undefined || target.waitMs !== undefined || typeof target.name === 'string')) {
+      return [{ name: 'executeCommand', args: { ...target } }];
+    }
+  }
+
+  if (!rawToolName || typeof rawToolName !== 'string') return [];
+  const toolName = resolveRegisteredToolName(rawToolName) || rawToolName.trim();
 
   let rawArgs = target.arguments !== undefined
     ? target.arguments
@@ -377,7 +537,7 @@ function normalizeParsedToolCallObject(parsed) {
     }
   }
 
-  return [{ name: toolName.trim(), args }];
+  return [{ name: toolName, args }];
 }
 
 // Text-based fallback tool calls detector and parser
@@ -388,32 +548,14 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
   let tempText = text || '';
   const sourceText = tempText;
 
-  // 1. Match <tool_call name="tool_name">arguments</tool_call>
-  const toolCallTagRegex = /<tool_call\s+name=["']([^"']+)["']\s*>([\s\S]*?)<\/tool_call>/gi;
+  // 1. Match <tool_call name="tool_name">arguments</tool_call> (and <tool_use>, <tool>, <invoke>, <function_call>)
+  const toolCallTagRegex = /<(?:tool_call|tool_use|tool|invoke|function_call)\s+(?:name|tool|function)=["']([^"']+)["']\s*>([\s\S]*?)<\/(?:tool_call|tool_use|tool|invoke|function_call)>/gi;
   let match;
   while ((match = toolCallTagRegex.exec(sourceText)) !== null) {
-    const name = match[1].trim();
+    const rawName = match[1].trim();
+    const name = resolveRegisteredToolName(rawName) || rawName;
     const rawArgs = match[2].trim();
-    let args = {};
-    try {
-      const xmlArgs = parseXmlParameterTags(rawArgs);
-      if (xmlArgs) {
-        args = xmlArgs;
-      } else {
-        args = parseRelaxedJson(rawArgs);
-        if (args && typeof args === 'object') {
-          if (args.arguments && typeof args.arguments === 'object') {
-            args = args.arguments;
-          } else if (args.args && typeof args.args === 'object') {
-            args = args.args;
-          } else if (args.parameters && typeof args.parameters === 'object') {
-            args = args.parameters;
-          }
-        }
-      }
-    } catch (e) {
-      // Ignore invalid JSON parsing in tag content
-    }
+    const args = parseToolXmlBodyAndAttributes(name, rawArgs);
     foundCalls.push({ name, args, rawMatch: match[0] });
   }
 
@@ -432,36 +574,58 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     }
   }
 
+  // 1.3 Match <tool_call><name>tool_name</name><arguments>{...}</arguments></tool_call>
+  const xmlWrappedToolCallRegex = /<\|?tool_call\|?\s*>\s*<(?:name|tool|function)>([a-zA-Z0-9_-]+)<\/(?:name|tool|function)>\s*(?:<(?:arguments|args|parameters|params)>([\s\S]*?)<\/(?:arguments|args|parameters|params)>)?\s*(?:<\/tool_call>|<\|?tool_call\|?>)/gi;
+  while ((match = xmlWrappedToolCallRegex.exec(sourceText)) !== null) {
+    const rawName = match[1].trim();
+    const name = resolveRegisteredToolName(rawName) || rawName;
+    const rawArgs = (match[2] || '').trim();
+    const args = parseToolXmlBodyAndAttributes(name, rawArgs);
+    foundCalls.push({ name, args, rawMatch: match[0] });
+  }
+
   // 2. Match <call_tool_name>arguments</call_tool_name>
   const callTagRegex = /<call_([a-zA-Z0-9_-]+)>([\s\S]*?)<\/call_\1>/gi;
   while ((match = callTagRegex.exec(sourceText)) !== null) {
-    const name = match[1].trim();
+    const rawName = match[1].trim();
+    const name = resolveRegisteredToolName(rawName) || rawName;
     const rawArgs = match[2].trim();
-    let args = {};
-    try {
-      const xmlArgs = parseXmlParameterTags(rawArgs);
-      if (xmlArgs) {
-        args = xmlArgs;
-      } else {
-        args = parseRelaxedJson(rawArgs);
-        if (args && typeof args === 'object') {
-          if (args.arguments && typeof args.arguments === 'object') {
-            args = args.arguments;
-          } else if (args.args && typeof args.args === 'object') {
-            args = args.args;
-          } else if (args.parameters && typeof args.parameters === 'object') {
-            args = args.parameters;
-          }
-        }
-      }
-    } catch (e) {}
+    const args = parseToolXmlBodyAndAttributes(name, rawArgs);
     foundCalls.push({ name, args, rawMatch: match[0] });
+  }
+
+  // 2.1 Match direct XML tool-name tags: <executeCommand>{...}</executeCommand>, <writeFile>...</writeFile>, etc.
+  // Supports optional XML attributes on the opening tag, JSON bodies, XML child parameter tags, or plain-text bodies.
+  const directToolTagRegex = /<([a-zA-Z][a-zA-Z0-9_-]*)(?:\s+([^<>]*?))?>([\s\S]*?)<\/\1>/g;
+  while ((match = directToolTagRegex.exec(sourceText)) !== null) {
+    const rawTagName = match[1].trim();
+    if (/^call_/i.test(rawTagName)) continue; // Already handled by Step 2
+    const resolvedName = resolveRegisteredToolName(rawTagName);
+    if (!resolvedName) continue;
+
+    const rawAttrs = match[2] || '';
+    const rawArgs = match[3] || '';
+    const args = parseToolXmlBodyAndAttributes(resolvedName, rawArgs, rawAttrs);
+    foundCalls.push({ name: resolvedName, args, rawMatch: match[0] });
+  }
+
+  // 2.2 Match self-closing direct XML tool tags: <executeCommand command="npm test" background="true" />
+  const selfClosingToolTagRegex = /<([a-zA-Z][a-zA-Z0-9_-]*)\s+([^<>]+?)\s*\/>/g;
+  while ((match = selfClosingToolTagRegex.exec(sourceText)) !== null) {
+    const rawTagName = match[1].trim();
+    const resolvedName = resolveRegisteredToolName(rawTagName);
+    if (!resolvedName) continue;
+    const args = parseXmlAttributes(match[2]);
+    if (Object.keys(args).length > 0) {
+      foundCalls.push({ name: resolvedName, args, rawMatch: match[0] });
+    }
   }
 
   // 2.6 Match Gemma 4 / LMStudio style <|tool_call>call:tool_name{arguments}<tool_call|><|tool_response>
   const lmStudioRegex = /(?:<\|?tool_call\|?\s*>\s*)?call:([a-zA-Z0-9_-]+)\s*(\{[\s\S]*?\})\s*(?:<tool_call\|>|<\|tool_call\|>|<\/tool_call>|<\|?tool_response\|?>)(?:\s*<\|?tool_response\|?>)*/gi;
   while ((match = lmStudioRegex.exec(sourceText)) !== null) {
-    const name = match[1].trim();
+    const rawName = match[1].trim();
+    const name = resolveRegisteredToolName(rawName) || rawName;
     const rawArgs = match[2].trim();
     let args = {};
     try {
@@ -476,7 +640,8 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
   if (foundCalls.length === 0) {
     const unclosedGemmaCallRegex = /<\|?tool_call\|?\s*>\s*call:([a-zA-Z0-9_-]+)\s*(\{[\s\S]*\})\s*$/gi;
     while ((match = unclosedGemmaCallRegex.exec(sourceText)) !== null) {
-      const name = match[1].trim();
+      const rawName = match[1].trim();
+      const name = resolveRegisteredToolName(rawName) || rawName;
       const rawArgs = match[2].trim();
       let args = {};
       try {
@@ -489,37 +654,18 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
   // 2.5 Match <function=tool_name>arguments</tool_call> or <function=tool_name>arguments</function> (optionally wrapped in <tool_call>...</tool_call>)
   const functionTagRegex = /(?:<\|?tool_call\|?\s*>\s*)?<function=["']?([a-zA-Z0-9_-]+)["']?\s*>([\s\S]*?)(?:<\/function>\s*(?:<\/tool_call>|<\|?tool_call\|?>)?|<\/tool_call>)/gi;
   while ((match = functionTagRegex.exec(sourceText)) !== null) {
-    const name = match[1].trim();
+    const rawName = match[1].trim();
+    const name = resolveRegisteredToolName(rawName) || rawName;
     const rawArgs = match[2].trim();
-    let args = {};
-    try {
-      if (rawArgs && rawArgs.trim()) {
-        const xmlArgs = parseXmlParameterTags(rawArgs);
-        if (xmlArgs) {
-          args = xmlArgs;
-        } else {
-          args = parseRelaxedJson(rawArgs);
-          if (args && typeof args === 'object') {
-            if (args.arguments && typeof args.arguments === 'object') {
-              args = args.arguments;
-            } else if (args.args && typeof args.args === 'object') {
-              args = args.args;
-            } else if (args.parameters && typeof args.parameters === 'object') {
-              args = args.parameters;
-            }
-          }
-        }
-      }
-    } catch (e) {
-      // Ignore invalid JSON parsing in tag content
-    }
+    const args = parseToolXmlBodyAndAttributes(name, rawArgs);
     foundCalls.push({ name, args, rawMatch: match[0] });
   }
 
   // 2.7 Match tool call tag style [Agent Tool Call: "tool_name" with args: {arguments}] (Ignore "Executed" which indicates past logs)
   const agentToolCallRegex = /\[Agent Tool Call:\s*(?!Executed\b)["']?([a-zA-Z0-9_-]+)["']?\s*(?:with\s+args:|args:)?\s*(\{[\s\S]*?\})\]/gi;
   while ((match = agentToolCallRegex.exec(sourceText)) !== null) {
-    const name = match[1].trim();
+    const rawName = match[1].trim();
+    const name = resolveRegisteredToolName(rawName) || rawName;
     const rawArgs = match[2].trim();
     let args = {};
     try {
@@ -530,21 +676,38 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     foundCalls.push({ name, args, rawMatch: match[0] });
   }
 
-  // 3. Match markdown JSON/raw code blocks
-  const markdownRegex = /```(?:json)?\s*([\s\S]*?)```/gi;
-  while ((match = markdownRegex.exec(sourceText)) !== null) {
-    const blockContent = match[1].trim();
-    try {
-      const parsed = parseRelaxedJson(blockContent);
-      const normalized = normalizeParsedToolCallObject(parsed);
-      const validCalls = normalized.filter(c => c.name && tools[c.name]);
-      if (validCalls.length > 0) {
-        for (const call of validCalls) {
-          foundCalls.push({ ...call, rawMatch: match[0] });
+  // 3. Match markdown JSON/raw code blocks (only when not already matched via XML tool tags)
+  if (foundCalls.length === 0) {
+    const markdownRegex = /```(?:json)?\s*([\s\S]*?)```/gi;
+    while ((match = markdownRegex.exec(sourceText)) !== null) {
+      const blockContent = match[1].trim();
+      try {
+        const parsed = parseRelaxedJson(blockContent);
+        const normalized = normalizeParsedToolCallObject(parsed);
+        const validCalls = normalized.filter(c => c.name && tools[c.name]);
+        if (validCalls.length > 0) {
+          for (const call of validCalls) {
+            foundCalls.push({ ...call, rawMatch: match[0] });
+          }
         }
+      } catch (e) {
+        // not a valid JSON tool block
       }
-    } catch (e) {
-      // not a valid JSON tool block
+    }
+  }
+
+  // 3.5 Match standalone or code-fenced function call syntax: executeCommand({ ... })
+  if (foundCalls.length === 0) {
+    const inlineFnCallRegex = /(?:```(?:javascript|js|ts|json)?\s*)?\b([a-zA-Z][a-zA-Z0-9_]*)\s*\(\s*(\{[\s\S]*?\})\s*\)\s*;?(?:\s*```)?/g;
+    while ((match = inlineFnCallRegex.exec(sourceText)) !== null) {
+      const resolvedName = resolveRegisteredToolName(match[1]);
+      if (!resolvedName) continue;
+      try {
+        const parsedArgs = parseRelaxedJson(match[2].trim());
+        if (parsedArgs && typeof parsedArgs === 'object' && !Array.isArray(parsedArgs)) {
+          foundCalls.push({ name: resolvedName, args: parsedArgs, rawMatch: match[0] });
+        }
+      } catch (e) {}
     }
   }
 
@@ -606,10 +769,11 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     }
   }
 
-  // Strip any residual special tool/thought delimiter tokens
+  // Strip any residual special tool/thought delimiter tokens or empty code fences left after stripping tool calls
   tempText = tempText
-    .replace(/<\|?tool_response\|?>/gi, '')
-    .replace(/<\|?tool_call\|?>/gi, '')
+    .replace(/<\/?\|?tool_response\|?>/gi, '')
+    .replace(/<\/?\|?tool_call\|?>/gi, '')
+    .replace(/```[a-zA-Z0-9_-]*\s*```/g, '')
     .trim();
 
   return {
@@ -2197,14 +2361,17 @@ export class Ollama extends BaseLlm {
  * Fetch available models from the local Ollama or LM Studio instance
  * @param {boolean} [detailed=false] If true, returns full model metadata objects. If false, returns model name strings.
  * @param {string|null} [targetProvider=null] Optional explicit provider ('ollama' | 'lmstudio') to avoid mutating global provider state during concurrent discovery.
+ * @param {object} [options={}] Optional settings ({ timeoutMs?: number, silent?: boolean })
  * @returns {Promise<Array<string|object>>} List of model names or model objects
  */
-export async function fetchOllamaModels(detailed = false, targetProvider = null) {
+export async function fetchOllamaModels(detailed = false, targetProvider = null, options = {}) {
   const provider = targetProvider || getLlmProvider();
   const providerName = provider === 'lmstudio' ? 'LM Studio' : 'Ollama';
   const baseUrl = getOllamaBaseUrl(provider);
   const headers = getOllamaHeaders(provider);
-  const modelsLoader = startSpinner(`Fetching installed models from ${providerName}...`);
+  const timeoutMs = typeof options?.timeoutMs === 'number' && options.timeoutMs > 0 ? options.timeoutMs : 5000;
+  const silent = Boolean(options?.silent);
+  const modelsLoader = silent ? { stop: () => {} } : startSpinner(`Fetching installed models from ${providerName}...`);
   try {
     let response;
     try {
@@ -2215,12 +2382,12 @@ export async function fetchOllamaModels(detailed = false, targetProvider = null)
         }
         response = await fetch(`${url}/models`, {
           headers,
-          signal: AbortSignal.timeout(5000)
+          signal: AbortSignal.timeout(timeoutMs)
         });
       } else {
         response = await fetch(`${baseUrl}/api/tags`, {
           headers,
-          signal: AbortSignal.timeout(5000)
+          signal: AbortSignal.timeout(timeoutMs)
         });
       }
     } finally {

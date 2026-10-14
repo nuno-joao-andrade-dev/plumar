@@ -89,7 +89,15 @@ export function loadProviderSettings() {
         if (rawMaxSteps !== undefined) {
           const parsedSteps = parseInt(rawMaxSteps, 10);
           if (!isNaN(parsedSteps) && parsedSteps >= 1) {
-            maxToolSteps = parsedSteps;
+            // Migrate legacy default 25 to new default 75 unless explicitly configured
+            if (parsedSteps === 25 && !parsed.maxToolStepsExplicit) {
+              maxToolSteps = 75;
+            } else {
+              maxToolSteps = parsedSteps;
+              if (parsed.maxToolStepsExplicit) {
+                maxToolStepsExplicit = true;
+              }
+            }
           }
         }
       }
@@ -124,6 +132,9 @@ export function saveProviderSettings() {
   parsed.autoMinimize = autoMinimize;
   parsed.executeThinking = executeThinking;
   parsed.maxToolSteps = maxToolSteps;
+  if (maxToolStepsExplicit) {
+    parsed.maxToolStepsExplicit = true;
+  }
 
   if (!parsed.provider) {
     parsed.provider = {};
@@ -150,7 +161,8 @@ let ollamaAuth = '';
 let lmStudioAuth = '';
 let autoMinimize = false;
 let executeThinking = false;
-let maxToolSteps = 25;
+let maxToolSteps = 75;
+let maxToolStepsExplicit = false;
 
 // Load saved settings from settings file
 loadProviderSettings();
@@ -231,6 +243,7 @@ export function setMaxToolSteps(steps) {
     return maxToolSteps;
   }
   maxToolSteps = Math.min(200, parsed);
+  maxToolStepsExplicit = true;
   process.env.MAX_TOOL_STEPS = String(maxToolSteps);
   saveProviderSettings();
   return maxToolSteps;

@@ -76,7 +76,7 @@ export async function executePipeCommand(command, abortSignal) {
 }
 
 import { runAgentTurn, refeedThinkingProcess, resetTurnToolHistory, tools, fetchOllamaModels, CHAT_MODES, getDefaultChatMode, getOllamaBaseUrl, setOllamaBaseUrl, getOllamaAuth, setOllamaAuth, registerMcpTools, sessionService, isVerboseJsonEnabled, setVerboseJsonEnabled, isAdkInfoEnabled, setAdkInfoEnabled, setReadlineInterface, setDefaultPolicy, setToolPolicy, getToolPolicy, getAllToolPolicies, getDefaultPolicy, getActivePolicyConfigFile, loadPolicyConfig, savePolicyConfig, checkToolPermission, getSessionTokens, castParameter, getLlmProvider, setLlmProvider, getOllamaHost, setOllamaHost, getLmStudioHost, setLmStudioHost, getLmStudioAuth, setLmStudioAuth, isAutoMinimizeEnabled, setAutoMinimizeEnabled, isExecuteThinkingEnabled, setExecuteThinkingEnabled, getMaxToolSteps, setMaxToolSteps } from './src/agent.js';
-import { extractThinkingProcessToolCalls } from './src/ollama-client.js';
+import { extractThinkingProcessToolCalls, startSpinner } from './src/ollama-client.js';
 import { loadAndStartMcpServers, getMcpTools } from './src/mcp-client-manager.js';
 import { createCliCompleter } from './src/completer.js';
 import { stripTerminalQueryGarbage } from './src/terminal-io.js';
@@ -282,31 +282,42 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
   let selectedModel = null;
   rl.line = '';
   rl.cursor = 0;
+  const isLocalEndpoint = (hostUrl) => /\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(String(hostUrl || ''));
   while (!selectedModel) {
-    console.log(pc.dim(`Querying Ollama at ${pc.bold(getOllamaHost())} and LM Studio at ${pc.bold(getLmStudioHost())} for models...\n`));
+    const ollamaHost = getOllamaHost();
+    const lmStudioHost = getLmStudioHost();
+    console.log(pc.dim(`Querying Ollama at ${pc.bold(ollamaHost)} and LM Studio at ${pc.bold(lmStudioHost)} for models...\n`));
 
     let ollamaModels = [];
     let lmStudioModels = [];
     let ollamaError = null;
     let lmStudioError = null;
 
-    const ollamaPromise = (async () => {
-      try {
-        ollamaModels = await fetchOllamaModels(true, 'ollama');
-      } catch (err) {
-        ollamaError = err.message;
-      }
-    })();
+    const discoverySpinner = startSpinner('Discovering available models from Ollama and LM Studio...');
+    try {
+      const ollamaTimeout = isLocalEndpoint(ollamaHost) ? 1200 : 2500;
+      const lmStudioTimeout = isLocalEndpoint(lmStudioHost) ? 1200 : 2500;
 
-    const lmStudioPromise = (async () => {
-      try {
-        lmStudioModels = await fetchOllamaModels(true, 'lmstudio');
-      } catch (err) {
-        lmStudioError = err.message;
-      }
-    })();
+      const ollamaPromise = (async () => {
+        try {
+          ollamaModels = await fetchOllamaModels(true, 'ollama', { timeoutMs: ollamaTimeout, silent: true });
+        } catch (err) {
+          ollamaError = err.message;
+        }
+      })();
 
-    await Promise.all([ollamaPromise, lmStudioPromise]);
+      const lmStudioPromise = (async () => {
+        try {
+          lmStudioModels = await fetchOllamaModels(true, 'lmstudio', { timeoutMs: lmStudioTimeout, silent: true });
+        } catch (err) {
+          lmStudioError = err.message;
+        }
+      })();
+
+      await Promise.all([ollamaPromise, lmStudioPromise]);
+    } finally {
+      discoverySpinner.stop();
+    }
 
     console.log(pc.bold(pc.yellow('\nAvailable Models:')));
     console.log(pc.bold(pc.cyan('─'.repeat(60))));
@@ -393,7 +404,6 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
           if (newUrl.trim()) {
             setOllamaHost(newUrl.trim());
             console.log(pc.green(`Ollama Host successfully updated to: ${pc.bold(getOllamaHost())}`));
-            await new Promise(r => setTimeout(r, 800));
           }
         } else if (trimmedChoice === '2') {
           const newAuth = await rl.question(pc.cyan(`Enter Ollama Authentication Header/Token (type "none" to clear) › `));
@@ -405,14 +415,12 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
               setOllamaAuth(tAuth);
             }
             console.log(pc.green(`Ollama Authentication successfully updated.`));
-            await new Promise(r => setTimeout(r, 800));
           }
         } else if (trimmedChoice === '3') {
           const newUrl = await rl.question(pc.cyan(`Enter LM Studio Server URL (press [Enter] to keep current: ${getLmStudioHost()}) › `));
           if (newUrl.trim()) {
             setLmStudioHost(newUrl.trim());
             console.log(pc.green(`LM Studio Host successfully updated to: ${pc.bold(getLmStudioHost())}`));
-            await new Promise(r => setTimeout(r, 800));
           }
         } else if (trimmedChoice === '4') {
           const newAuth = await rl.question(pc.cyan(`Enter LM Studio Authentication Header/Token (type "none" to clear) › `));
@@ -424,7 +432,6 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
               setLmStudioAuth(tAuth);
             }
             console.log(pc.green(`LM Studio Authentication successfully updated.`));
-            await new Promise(r => setTimeout(r, 800));
           }
         } else if (trimmedChoice === '5') {
           back = true;
@@ -453,6 +460,13 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
       } else {
         return null;
       }
+    } else if (trimmed === '' && modelLookup.length > 0) {
+      const defaultSelected = modelLookup.find(m => m.name === currentActiveModel && m.provider === getLlmProvider()) || modelLookup[0];
+      setLlmProvider(defaultSelected.provider);
+      selectedModel = defaultSelected.name;
+      console.log(pc.green(`Selected active provider: ${pc.bold(defaultSelected.provider === 'lmstudio' ? 'LM Studio' : 'Ollama')}`));
+      console.log(pc.green(`Selected active model: ${pc.bold(selectedModel)}\n`));
+      return { selectedModel, provider: defaultSelected.provider };
     } else {
       const choiceIndex = parseInt(trimmed, 10) - 1;
       if (choiceIndex >= 0 && choiceIndex < modelLookup.length) {
@@ -461,7 +475,6 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
         selectedModel = selected.name;
         console.log(pc.green(`Selected active provider: ${pc.bold(selected.provider === 'lmstudio' ? 'LM Studio' : 'Ollama')}`));
         console.log(pc.green(`Selected active model: ${pc.bold(selectedModel)}\n`));
-        await new Promise(r => setTimeout(r, 600));
         return { selectedModel, provider: selected.provider };
       } else {
         const matched = modelLookup.find(item => item.name.toLowerCase() === trimmed);
@@ -470,11 +483,9 @@ async function runModelSelectionFlow(rl, isStartup = false, currentActiveModel =
           selectedModel = matched.name;
           console.log(pc.green(`Selected active provider: ${pc.bold(matched.provider === 'lmstudio' ? 'LM Studio' : 'Ollama')}`));
           console.log(pc.green(`Selected active model: ${pc.bold(selectedModel)}\n`));
-          await new Promise(r => setTimeout(r, 600));
           return { selectedModel, provider: matched.provider };
         } else {
           console.log(pc.red('Invalid selection. Please enter a valid number or option letter.\n'));
-          await new Promise(r => setTimeout(r, 1000));
         }
       }
     }
@@ -944,6 +955,12 @@ async function main() {
   rl.question = async function(query, options) {
     rl.line = '';
     rl.cursor = 0;
+    if (input && typeof input.isPaused === 'function' && input.isPaused()) {
+      input.resume();
+    }
+    if (typeof rl.resume === 'function') {
+      rl.resume();
+    }
     let answer = await originalQuestion(query, options);
     if (typeof answer === 'string') {
       answer = stripTerminalQueryGarbage(answer);
@@ -1056,10 +1073,8 @@ async function main() {
         sessionId = lastSession.id;
         await populateReadlineHistory(rl, sessionId);
         console.log(pc.green(`Loaded and resumed last session: ${pc.bold(sessionId)}\n`));
-        await new Promise(r => setTimeout(r, 800));
       } else {
         console.log(pc.yellow(`Starting a new clean session.\n`));
-        await new Promise(r => setTimeout(r, 600));
       }
     }
   } catch (err) {
@@ -1877,7 +1892,7 @@ export const tool = new FunctionTool({
                 console.log(pc.green(`Max tool steps per turn set to: ${pc.bold(String(updated))}\n`));
                 displaySettingsTable();
               } else {
-                console.log(pc.red(`Please specify a positive integer (1 - 200), e.g.: /settings max-tool-steps 25\n`));
+                console.log(pc.red(`Please specify a positive integer (1 - 200), e.g.: /settings max-tool-steps 75\n`));
               }
             } else if (key === 'policy') {
               if (['allow', 'ask', 'deny'].includes(value.toLowerCase())) {

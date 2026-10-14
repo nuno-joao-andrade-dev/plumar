@@ -1,5 +1,5 @@
 import { LlmAgent, Runner, FileArtifactService, getFunctionCalls, getFunctionResponses } from '@google/adk';
-import { getLoadedSkills } from './skills-plugins-manager.js';
+import { getLoadedSkills, detectRelevantTechSkills } from './skills-plugins-manager.js';
 import { PersistentFileSessionService } from './session-manager.js';
 import path from 'node:path';
 import pc from 'picocolors';
@@ -225,10 +225,19 @@ CRITICAL DIRECTIVES:
   let systemPrompt = terminalCapabilityHeader + '\n\n' + modeMeta.systemPrompt;
   const loadedSkills = getLoadedSkills();
   if (Object.keys(loadedSkills).length > 0) {
-    systemPrompt += '\n\n### Available Custom Skills\n';
-    systemPrompt += 'You have access to the following custom skills to help you with specialized tasks. To use a skill, call the `loadSkill` tool with the skill\'s name to read its instructions first.\n';
+    systemPrompt += '\n\n### Available Custom & Technology Skills\n';
+    systemPrompt += 'You have access to the following built-in and custom skills to help you with specialized technologies and workflows. You can call the `loadSkill` tool with a skill\'s name at any time to read its full instructions:\n';
     for (const [name, skill] of Object.entries(loadedSkills)) {
       systemPrompt += `- **${name}**: ${skill.frontmatter.description}\n`;
+    }
+
+    const matchedTechSkills = detectRelevantTechSkills(userMessage, process.cwd(), 2);
+    if (matchedTechSkills.length > 0) {
+      systemPrompt += '\n### Auto-Detected Technology Stack Skill Guidance\n';
+      systemPrompt += 'Based on the user request and workspace stack, the following technology skill guidelines are automatically active for this turn (ALWAYS invoke tools via native tool calls or standard `{ "name": "<toolName>", "arguments": { ... } }` JSON blocks):\n';
+      for (const skill of matchedTechSkills) {
+        systemPrompt += `\n#### Skill: ${skill.name}\n${skill.instructions}\n`;
+      }
     }
   }
 
@@ -313,7 +322,7 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
 
   const agent = new LlmAgent({
     name: modeKey,
-    instruction: systemPrompt,
+    instruction: () => systemPrompt,
     generateContentConfig: {
       temperature: parameters.temperature !== undefined ? parameters.temperature : (modeMeta.temperature ?? 0.7),
     },

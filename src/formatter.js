@@ -253,39 +253,20 @@ import { marked } from 'marked';
 import TerminalRenderer from 'marked-terminal';
 import { getAliveBackgroundProcesses, listBackgroundProcesses } from './tools/process-registry.js';
 
-let initLip = null;
-let Lipgloss = null;
 let lipInstance = null;
 let isLipInitialized = false;
 
 export async function initializeFormatter() {
   if (isLipInitialized) return;
-
-  // Only attempt to load and initialize charsm if running on supported x86_64 architectures
-  // (since charsm bundles x86_64 native binary libraries)
-  if (process.arch !== 'x64' || (process.platform !== 'linux' && process.platform !== 'win32')) {
-    return;
-  }
-
-  try {
-    const charsmModule = await import('charsm');
-    initLip = charsmModule.initLip;
-    Lipgloss = charsmModule.Lipgloss;
-
-    const success = await initLip();
-    if (success) {
-      lipInstance = new Lipgloss();
-      isLipInitialized = true;
-    }
-  } catch (err) {
-    // Graceful fallback is already handled
-  }
+  isLipInitialized = true;
+  // NOTE: Do NOT import 'charsm' here.
+  // Importing 'charsm' unconditionally loads './binary/huh.so' via ffi-napi,
+  // which initializes a CGo runtime whose bubbletea.init.0 -> termenv.termStatusReport(11)
+  // mutates TTY termios via raw Linux ioctl(TCSETS) (disabling ECHO and ICANON) and
+  // polls/reads directly from stdin (FD 0) in Go for 5 seconds, freezing user typing
+  // at the startup model selection prompt. Markdown is rendered via marked + marked-terminal.
 }
 
-// Start initialization in background on import, unless in test environment
-if (typeof process !== 'undefined' && !process.env.NODE_TEST_CONTEXT && process.env.NODE_ENV !== 'test') {
-  initializeFormatter().catch(() => {});
-}
 
 marked.setOptions({
   renderer: new TerminalRenderer({

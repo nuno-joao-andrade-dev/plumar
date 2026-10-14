@@ -10,7 +10,9 @@ import {
   loadAllSkills, 
   loadAllPlugins, 
   getLoadedSkills, 
-  getLoadedPlugins 
+  getLoadedPlugins,
+  findSkillByNameOrKeyword,
+  detectRelevantTechSkills
 } from '../src/skills-plugins-manager.js';
 import { tools } from '../src/tools.js';
 
@@ -109,5 +111,43 @@ export const testPluginTool = new FunctionTool({
     assert.ok(loadRes.success);
     assert.equal(loadRes.name, 'test-skill-temp');
     assert.equal(loadRes.instructions, 'Instructions for unit test skill.');
+  });
+
+  await t.test('Built-in Core Technology Skills: should load all 5 core tech skills and support keyword resolution', async () => {
+    const skills = getLoadedSkills();
+    const expectedSkills = [
+      'fullstack-web-node',
+      'python-development',
+      'database-sql',
+      'testing-debugging-devops',
+      'systems-compiled-languages'
+    ];
+    for (const sName of expectedSkills) {
+      assert.ok(skills[sName], `Expected built-in skill '${sName}' to be loaded`);
+      assert.ok(skills[sName].instructions.length > 100);
+    }
+
+    // Verify loadSkill works with parameter alias & keyword matching
+    const pyRes = await tools.loadSkill.execute({ skill: 'fastapi' });
+    assert.ok(pyRes.success);
+    assert.equal(pyRes.name, 'python-development');
+
+    const sqlRes = await tools.loadSkill.execute({ skillName: 'postgres' });
+    assert.ok(sqlRes.success);
+    assert.equal(sqlRes.name, 'database-sql');
+  });
+
+  await t.test('detectRelevantTechSkills: should auto-detect relevant technology skills from user prompt and workspace', () => {
+    const webDetected = detectRelevantTechSkills('Build a React + Vite frontend and Express REST API', testWorkspace, 2);
+    assert.ok(webDetected.some(s => s.name === 'fullstack-web-node'));
+
+    const pyDetected = detectRelevantTechSkills('Create a FastAPI service with pytest unit tests in a virtualenv', testWorkspace, 2);
+    assert.ok(pyDetected.some(s => s.name === 'python-development'));
+
+    const sqlDetected = detectRelevantTechSkills('Write a PostgreSQL schema migration and query the users table', testWorkspace, 2);
+    assert.ok(sqlDetected.some(s => s.name === 'database-sql'));
+
+    const sysDetected = detectRelevantTechSkills('Implement a concurrent HTTP worker in Go using go.mod and goroutines', testWorkspace, 2);
+    assert.ok(sysDetected.some(s => s.name === 'systems-compiled-languages'));
   });
 });
