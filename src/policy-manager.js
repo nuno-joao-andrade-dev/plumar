@@ -241,8 +241,9 @@ export function wrapFunctionTool(toolObj) {
       }
 
       // If a file-writing / idempotent mutation tool is called a second time with identical arguments
-      const isWriteTool = ['writeFile', 'writeBinaryFile', 'writeMarkdown', 'appendFile', 'searchReplace', 'codeFixer'].includes(toolObj.name);
-      if (duplicateCount === 1 && isWriteTool) {
+      const isWriteTool = ['writeFile', 'writeBinaryFile', 'writeMarkdown', 'appendFile', 'searchReplace', 'codeFixer', 'deleteFile', 'makeDirectory'].includes(toolObj.name);
+      const isIdempotentWriteTool = ['writeFile', 'writeBinaryFile', 'writeMarkdown', 'appendFile', 'searchReplace', 'codeFixer'].includes(toolObj.name);
+      if (duplicateCount === 1 && isIdempotentWriteTool) {
         activeTurnToolHistory.push(toolSignature);
         // Ensure disk write actually executes so the target file is guaranteed to be updated
         let writeResult;
@@ -273,6 +274,16 @@ export function wrapFunctionTool(toolObj) {
         const result = await toolObj.execute(args, context);
         // Only record in active turn tool history on successful completion
         if (result && result.success !== false) {
+          // If a workspace mutation occurred, clear prior read/inspection/verification tool calls
+          // so read -> edit -> re-read -> edit -> re-read or test -> fix -> re-test workflows are never blocked as loops
+          if (isWriteTool) {
+            const readOrVerifyPrefixes = ['readFile:', 'listFiles:', 'findFiles:', 'searchGrep:', 'executeCommand:', 'codeFormatter:', 'restClient:', 'gitHelper:'];
+            for (let i = activeTurnToolHistory.length - 1; i >= 0; i--) {
+              if (readOrVerifyPrefixes.some(prefix => activeTurnToolHistory[i].startsWith(prefix))) {
+                activeTurnToolHistory.splice(i, 1);
+              }
+            }
+          }
           activeTurnToolHistory.push(toolSignature);
         }
         printToolResult(toolObj.name, result);

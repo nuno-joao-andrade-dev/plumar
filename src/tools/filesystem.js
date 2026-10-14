@@ -3,7 +3,7 @@ import { z } from 'zod';
 import fs from 'fs/promises';
 import path from 'path';
 import { exec, spawn } from 'child_process';
-import { resolveSafePath, WORKSPACE_DIR, setLastWorkspaceFile } from './core-helper.js';
+import { resolveSafePath, WORKSPACE_DIR, setLastWorkspaceFile, getLastWorkspaceFile } from './core-helper.js';
 import { startBackgroundProcess } from './process-registry.js';
 
 export const filesystemTools = {
@@ -14,10 +14,12 @@ export const filesystemTools = {
       directory: z.string().optional().describe('The relative directory to list, defaults to the workspace root "."'),
       path: z.string().optional().describe('Alternative parameter name for directory'),
       directoryPath: z.string().optional().describe('Alternative parameter name for directory'),
+      dir: z.string().optional().describe('Alternative parameter name for directory'),
+      folder: z.string().optional().describe('Alternative parameter name for directory'),
     }),
     execute: async (args = {}) => {
       try {
-        const directory = args.directory || args.path || args.directoryPath || '.';
+        const directory = args.directory || args.path || args.directoryPath || args.dir || args.folder || '.';
         const targetPath = resolveSafePath(directory);
         
         const ignoreDirs = ['node_modules', '.git', '.antigravitycli', '.gemini', 'package-lock.json'];
@@ -64,10 +66,15 @@ export const filesystemTools = {
     parameters: z.object({
       filePath: z.string().optional().describe('The relative path of the file to read'),
       path: z.string().optional().describe('Alternative parameter name for filePath'),
+      file: z.string().optional().describe('Alternative parameter name for filePath'),
+      filename: z.string().optional().describe('Alternative parameter name for filePath'),
+      targetFile: z.string().optional().describe('Alternative parameter name for filePath'),
+      TargetFile: z.string().optional().describe('Alternative parameter name for filePath'),
+      filepath: z.string().optional().describe('Alternative parameter name for filePath'),
     }),
     execute: async (args = {}) => {
       try {
-        const filePath = args.filePath || args.path;
+        const filePath = args.filePath || args.path || args.file || args.filename || args.targetFile || args.TargetFile || args.filepath;
         if (!filePath) {
           return { success: false, error: 'Missing required parameter: filePath or path' };
         }
@@ -240,10 +247,14 @@ export const filesystemTools = {
     parameters: z.object({
       filePath: z.string().optional().describe('The relative path of the file to delete'),
       path: z.string().optional().describe('Alternative parameter name for filePath'),
+      file: z.string().optional().describe('Alternative parameter name for filePath'),
+      filename: z.string().optional().describe('Alternative parameter name for filePath'),
+      targetFile: z.string().optional().describe('Alternative parameter name for filePath'),
+      TargetFile: z.string().optional().describe('Alternative parameter name for filePath'),
     }),
     execute: async (args = {}) => {
       try {
-        const filePath = args.filePath || args.path;
+        const filePath = args.filePath || args.path || args.file || args.filename || args.targetFile || args.TargetFile;
         if (!filePath) {
           return { success: false, error: 'Missing required parameter: filePath or path' };
         }
@@ -273,10 +284,13 @@ export const filesystemTools = {
       directoryPath: z.string().optional().describe('The relative path of the directory to create'),
       path: z.string().optional().describe('Alternative parameter name for directoryPath'),
       directory: z.string().optional().describe('Alternative parameter name for directoryPath'),
+      dir: z.string().optional().describe('Alternative parameter name for directoryPath'),
+      folder: z.string().optional().describe('Alternative parameter name for directoryPath'),
+      filePath: z.string().optional().describe('Alternative parameter name for directoryPath'),
     }),
     execute: async (args = {}) => {
       try {
-        const directoryPath = args.directoryPath || args.path || args.directory || args.filePath;
+        const directoryPath = args.directoryPath || args.path || args.directory || args.dir || args.folder || args.filePath;
         if (!directoryPath) {
           return { success: false, error: 'Missing required parameter: directoryPath, path, or directory' };
         }
@@ -298,18 +312,24 @@ export const filesystemTools = {
     description: 'Search for text or a regular expression within text files in the workspace (excluding node_modules, .git, etc.).',
     parameters: z.object({
       query: z.string().optional().describe('The search query string or regex pattern'),
+      pattern: z.string().optional().describe('Alternative parameter name for query'),
+      search: z.string().optional().describe('Alternative parameter name for query'),
+      text: z.string().optional().describe('Alternative parameter name for query'),
+      keyword: z.string().optional().describe('Alternative parameter name for query'),
       directory: z.string().optional().describe('The relative subdirectory to search within, defaults to "."'),
       path: z.string().optional().describe('Alternative parameter name for directory'),
       directoryPath: z.string().optional().describe('Alternative parameter name for directory'),
+      dir: z.string().optional().describe('Alternative parameter name for directory'),
+      folder: z.string().optional().describe('Alternative parameter name for directory'),
       isRegex: z.boolean().optional().default(false).describe('Whether to treat the query as a regular expression pattern'),
     }),
     execute: async (args = {}) => {
       try {
-        const query = args.query;
+        const query = args.query || args.pattern || args.search || args.text || args.keyword;
         if (!query) {
           return { success: false, error: 'Missing required parameter: query' };
         }
-        const directory = args.directory || args.path || args.directoryPath || '.';
+        const directory = args.directory || args.path || args.directoryPath || args.dir || args.folder || '.';
         const isRegex = args.isRegex !== undefined ? args.isRegex : false;
         const targetPath = resolveSafePath(directory);
         const ignoreDirs = ['node_modules', '.git', '.antigravitycli', '.gemini', 'package-lock.json'];
@@ -392,6 +412,10 @@ export const filesystemTools = {
     parameters: z.object({
       filePath: z.string().optional().describe('The relative path of the markdown file to write (must end in .md)'),
       path: z.string().optional().describe('Alternative parameter name for filePath'),
+      file: z.string().optional().describe('Alternative parameter name for filePath'),
+      filename: z.string().optional().describe('Alternative parameter name for filePath'),
+      targetFile: z.string().optional().describe('Alternative parameter name for filePath'),
+      TargetFile: z.string().optional().describe('Alternative parameter name for filePath'),
       title: z.string().optional().describe('The main title of the markdown document'),
       sections: z.array(z.object({
         heading: z.string().describe('Section heading'),
@@ -400,7 +424,7 @@ export const filesystemTools = {
     }),
     execute: async (args = {}) => {
       try {
-        const filePath = args.filePath || args.path;
+        const filePath = args.filePath || args.path || args.file || args.filename || args.targetFile || args.TargetFile;
         if (!filePath) {
           return { success: false, error: 'Missing required parameter: filePath or path' };
         }
@@ -419,6 +443,7 @@ export const filesystemTools = {
         
         await fs.mkdir(path.dirname(targetPath), { recursive: true });
         await fs.writeFile(targetPath, markdownContent, 'utf-8');
+        setLastWorkspaceFile(finalPath);
         const stats = await fs.stat(targetPath);
         
         return {
@@ -437,20 +462,36 @@ export const filesystemTools = {
     name: 'executeCommand',
     description: 'Execute a terminal shell command within the workspace directory in the background. Commands are launched non-blockingly, observed for around 10 seconds to capture initial output and compilation logs, analyzed for URLs, ports, errors, and readiness, and pastes the complete analyzed output directly into the conversation context. All active background processes that are still alive are continuously monitored in the console below the prompt.',
     parameters: z.object({
-      command: z.string().describe('The shell command to execute in the background (e.g. "npm test", "node server.js", "ng serve --open").'),
+      command: z.string().optional().describe('The shell command to execute in the background (e.g. "npm test", "node server.js", "ng serve --open").'),
+      cmd: z.string().optional().describe('Alternative parameter name for command'),
+      commandLine: z.string().optional().describe('Alternative parameter name for command'),
+      CommandLine: z.string().optional().describe('Alternative parameter name for command'),
+      script: z.string().optional().describe('Alternative parameter name for command'),
       background: z.boolean().optional().default(true).describe('Always true. Commands are always executed in the background as managed persistent services.'),
       name: z.string().optional().describe('Optional descriptive label for the background service (e.g. "backend", "frontend", "api-server"). Used to track and manage the process.'),
       cwd: z.string().optional().describe('Optional working directory relative to workspace.'),
+      directory: z.string().optional().describe('Alternative parameter name for cwd'),
+      workingDirectory: z.string().optional().describe('Alternative parameter name for cwd'),
       waitMs: z.number().optional().default(10000).describe('Observation wait time in milliseconds (default: 10000 / 10s). The tool observes command output for this duration before analyzing and returning context.')
     }),
-    execute: async ({ command, background = true, name, cwd, waitMs = 10000 }) => {
-      // executeCommand is always executed in the background and observed for around 10s
-      return await startBackgroundProcess({
-        command,
-        name,
-        cwd,
-        startupWaitMs: waitMs !== undefined ? waitMs : 10000
-      });
+    execute: async (args = {}) => {
+      try {
+        const command = args.command || args.cmd || args.commandLine || args.CommandLine || args.script;
+        if (!command || typeof command !== 'string' || !command.trim()) {
+          return { success: false, error: 'Missing required parameter: command' };
+        }
+        const cwd = args.cwd || args.directory || args.workingDirectory;
+        const waitMs = args.waitMs !== undefined ? args.waitMs : 10000;
+        // executeCommand is always executed in the background and observed for around 10s
+        return await startBackgroundProcess({
+          command,
+          name: args.name,
+          cwd,
+          startupWaitMs: waitMs
+        });
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
     }
   }),
 
@@ -460,24 +501,55 @@ export const filesystemTools = {
     parameters: z.object({
       filePath: z.string().optional().describe('The relative path of the file to modify'),
       path: z.string().optional().describe('Alternative parameter name for filePath'),
+      file: z.string().optional().describe('Alternative parameter name for filePath'),
+      filename: z.string().optional().describe('Alternative parameter name for filePath'),
+      targetFile: z.string().optional().describe('Alternative parameter name for filePath'),
+      TargetFile: z.string().optional().describe('Alternative parameter name for filePath'),
       findText: z.string().optional().describe('The exact text block to search for and replace'),
       find: z.string().optional().describe('Alternative parameter name for findText'),
       search: z.string().optional().describe('Alternative parameter name for findText'),
+      oldText: z.string().optional().describe('Alternative parameter name for findText'),
+      targetContent: z.string().optional().describe('Alternative parameter name for findText'),
+      TargetContent: z.string().optional().describe('Alternative parameter name for findText'),
       replaceText: z.string().optional().describe('The text block to replace the search match with'),
       replace: z.string().optional().describe('Alternative parameter name for replaceText'),
+      replacement: z.string().optional().describe('Alternative parameter name for replaceText'),
+      newText: z.string().optional().describe('Alternative parameter name for replaceText'),
+      replacementContent: z.string().optional().describe('Alternative parameter name for replaceText'),
+      ReplacementContent: z.string().optional().describe('Alternative parameter name for replaceText'),
       content: z.string().optional().describe('Alternative parameter name for replaceText'),
     }),
     execute: async (args = {}) => {
       try {
-        const filePath = args.filePath || args.path || getLastWorkspaceFile();
+        const filePath = args.filePath || args.path || args.file || args.filename || args.targetFile || args.TargetFile || getLastWorkspaceFile();
         if (!filePath) {
           return { success: false, error: 'Missing required parameter: filePath or path' };
         }
-        const findText = args.findText !== undefined ? args.findText : (args.find !== undefined ? args.find : args.search);
+        const findText = args.findText !== undefined
+          ? args.findText
+          : (args.find !== undefined
+              ? args.find
+              : (args.search !== undefined
+                  ? args.search
+                  : (args.oldText !== undefined
+                      ? args.oldText
+                      : (args.targetContent !== undefined ? args.targetContent : args.TargetContent))));
         if (findText === undefined) {
           return { success: false, error: 'Missing required parameter: findText, find, or search' };
         }
-        const replaceText = args.replaceText !== undefined ? args.replaceText : (args.replace !== undefined ? args.replace : (args.content !== undefined ? args.content : ''));
+        const replaceText = args.replaceText !== undefined
+          ? args.replaceText
+          : (args.replace !== undefined
+              ? args.replace
+              : (args.replacement !== undefined
+                  ? args.replacement
+                  : (args.newText !== undefined
+                      ? args.newText
+                      : (args.replacementContent !== undefined
+                          ? args.replacementContent
+                          : (args.ReplacementContent !== undefined
+                              ? args.ReplacementContent
+                              : (args.content !== undefined ? args.content : ''))))));
 
         const targetPath = resolveSafePath(filePath);
         const stats = await fs.stat(targetPath);
@@ -506,11 +578,20 @@ export const filesystemTools = {
     name: 'findFiles',
     description: 'Find files in the workspace matching a specific pattern or containing a substring in their name.',
     parameters: z.object({
-      pattern: z.string().describe('The filename pattern or substring to search for (e.g., "*.js", "config", "index.html")'),
+      pattern: z.string().optional().describe('The filename pattern or substring to search for (e.g., "*.js", "config", "index.html")'),
+      query: z.string().optional().describe('Alternative parameter name for pattern'),
+      name: z.string().optional().describe('Alternative parameter name for pattern'),
+      glob: z.string().optional().describe('Alternative parameter name for pattern'),
       directory: z.string().optional().describe('The relative directory to search within, defaults to workspace root "."'),
+      dir: z.string().optional().describe('Alternative parameter name for directory'),
+      folder: z.string().optional().describe('Alternative parameter name for directory'),
+      path: z.string().optional().describe('Alternative parameter name for directory'),
+      directoryPath: z.string().optional().describe('Alternative parameter name for directory'),
     }),
-    execute: async ({ pattern, directory = '.' }) => {
+    execute: async (args = {}) => {
       try {
+        const pattern = args.pattern || args.query || args.name || args.glob || '*';
+        const directory = args.directory || args.dir || args.folder || args.path || args.directoryPath || '.';
         const targetPath = resolveSafePath(directory);
         const ignoreDirs = ['node_modules', '.git', '.antigravitycli', '.gemini', 'package-lock.json'];
         

@@ -285,6 +285,101 @@ export function parseRelaxedJson(str) {
   }
 }
 
+/**
+ * Parses XML-style parameter tags inside <function=...> or <tool_call> bodies,
+ * e.g. <parameter=filePath>index.js</parameter> or <param name="filePath">index.js</param>
+ */
+function parseXmlParameterTags(rawStr) {
+  if (!rawStr || typeof rawStr !== 'string') return null;
+  const params = {};
+  let matched = false;
+
+  const parseParamValue = (valStr) => {
+    const cleaned = valStr.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+    const trimmed = cleaned.trim();
+    if (trimmed === 'true') return true;
+    if (trimmed === 'false') return false;
+    if (trimmed === 'null') return null;
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        return parseRelaxedJson(trimmed);
+      } catch {}
+    }
+    return cleaned;
+  };
+
+  // Style 1: <parameter=name>value</parameter>
+  const eqParamRegex = /<parameter=([a-zA-Z0-9_.-]+)\s*>([\s\S]*?)<\/parameter>/gi;
+  let m;
+  while ((m = eqParamRegex.exec(rawStr)) !== null) {
+    matched = true;
+    params[m[1].trim()] = parseParamValue(m[2]);
+  }
+
+  // Style 2: <param name="key">value</param> or <parameter name="key">value</parameter>
+  const attrParamRegex = /<param(?:eter)?\s+name=["']?([^"'>\s]+)["']?\s*>([\s\S]*?)<\/param(?:eter)?>/gi;
+  while ((m = attrParamRegex.exec(rawStr)) !== null) {
+    matched = true;
+    params[m[1].trim()] = parseParamValue(m[2]);
+  }
+
+  return matched ? params : null;
+}
+
+/**
+ * Normalizes a parsed JSON tool call object (or array / OpenAI tool_calls wrapper)
+ * into an array of { name, args } entries. Preserves flat top-level arguments when
+ * arguments/args/parameters wrapper keys are omitted.
+ */
+function normalizeParsedToolCallObject(parsed) {
+  if (!parsed || typeof parsed !== 'object') return [];
+  if (Array.isArray(parsed)) {
+    return parsed.flatMap(item => normalizeParsedToolCallObject(item));
+  }
+  if (Array.isArray(parsed.tool_calls)) {
+    return parsed.tool_calls.flatMap(item => normalizeParsedToolCallObject(item));
+  }
+
+  let target = parsed;
+  if (target.function && typeof target.function === 'object' && (target.function.name || target.function.tool)) {
+    target = target.function;
+  }
+
+  const toolName = target.name || target.tool || target.function_name || (typeof target.function === 'string' ? target.function : null);
+  if (!toolName || typeof toolName !== 'string') return [];
+
+  let rawArgs = target.arguments !== undefined
+    ? target.arguments
+    : (target.args !== undefined
+        ? target.args
+        : (target.parameters !== undefined
+            ? target.parameters
+            : (target.params !== undefined ? target.params : target.input)));
+
+  if (typeof rawArgs === 'string') {
+    try {
+      rawArgs = parseRelaxedJson(rawArgs);
+    } catch {
+      rawArgs = {};
+    }
+  }
+
+  let args = {};
+  if (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)) {
+    args = rawArgs;
+  } else if (rawArgs === undefined) {
+    // Support flat tool call objects where parameters are top-level keys alongside "name"/"tool"
+    const metaKeys = new Set(['name', 'tool', 'function_name', 'function', 'type', 'id', 'tool_call_id', 'index']);
+    for (const [k, v] of Object.entries(target)) {
+      if (!metaKeys.has(k) && v !== undefined) {
+        args[k] = v;
+      }
+    }
+  }
+
+  return [{ name: toolName.trim(), args }];
+}
+
 // Text-based fallback tool calls detector and parser
 export function detectAndParseTextToolCalls(text, contents = null, thoughtText = null, isSubCall = false) {
   const foundCalls = [];
@@ -301,14 +396,19 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     const rawArgs = match[2].trim();
     let args = {};
     try {
-      args = parseRelaxedJson(rawArgs);
-      if (args && typeof args === 'object') {
-        if (args.arguments && typeof args.arguments === 'object') {
-          args = args.arguments;
-        } else if (args.args && typeof args.args === 'object') {
-          args = args.args;
-        } else if (args.parameters && typeof args.parameters === 'object') {
-          args = args.parameters;
+      const xmlArgs = parseXmlParameterTags(rawArgs);
+      if (xmlArgs) {
+        args = xmlArgs;
+      } else {
+        args = parseRelaxedJson(rawArgs);
+        if (args && typeof args === 'object') {
+          if (args.arguments && typeof args.arguments === 'object') {
+            args = args.arguments;
+          } else if (args.args && typeof args.args === 'object') {
+            args = args.args;
+          } else if (args.parameters && typeof args.parameters === 'object') {
+            args = args.parameters;
+          }
         }
       }
     } catch (e) {
@@ -323,15 +423,9 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     const rawContent = match[1].trim();
     try {
       const parsed = parseRelaxedJson(rawContent);
-      if (parsed && typeof parsed === 'object') {
-        const toolName = parsed.name || parsed.tool;
-        if (toolName && typeof toolName === 'string') {
-          let args = parsed.arguments || parsed.args || parsed.parameters || {};
-          if (typeof args !== 'object') {
-            args = {};
-          }
-          foundCalls.push({ name: toolName, args, rawMatch: match[0] });
-        }
+      const normalized = normalizeParsedToolCallObject(parsed);
+      for (const call of normalized) {
+        foundCalls.push({ name: call.name, args: call.args, rawMatch: match[0] });
       }
     } catch (e) {
       // Ignore invalid JSON parsing in Qwen tag content
@@ -345,14 +439,19 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     const rawArgs = match[2].trim();
     let args = {};
     try {
-      args = parseRelaxedJson(rawArgs);
-      if (args && typeof args === 'object') {
-        if (args.arguments && typeof args.arguments === 'object') {
-          args = args.arguments;
-        } else if (args.args && typeof args.args === 'object') {
-          args = args.args;
-        } else if (args.parameters && typeof args.parameters === 'object') {
-          args = args.parameters;
+      const xmlArgs = parseXmlParameterTags(rawArgs);
+      if (xmlArgs) {
+        args = xmlArgs;
+      } else {
+        args = parseRelaxedJson(rawArgs);
+        if (args && typeof args === 'object') {
+          if (args.arguments && typeof args.arguments === 'object') {
+            args = args.arguments;
+          } else if (args.args && typeof args.args === 'object') {
+            args = args.args;
+          } else if (args.parameters && typeof args.parameters === 'object') {
+            args = args.parameters;
+          }
         }
       }
     } catch (e) {}
@@ -387,22 +486,27 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
     }
   }
 
-  // 2.5 Match <function=tool_name>arguments</tool_call> or <function=tool_name>arguments</function>
-  const functionTagRegex = /<function=["']?([a-zA-Z0-9_-]+)["']?\s*>([\s\S]*?)(?:<\/function>|<\/tool_call>)/gi;
+  // 2.5 Match <function=tool_name>arguments</tool_call> or <function=tool_name>arguments</function> (optionally wrapped in <tool_call>...</tool_call>)
+  const functionTagRegex = /(?:<\|?tool_call\|?\s*>\s*)?<function=["']?([a-zA-Z0-9_-]+)["']?\s*>([\s\S]*?)(?:<\/function>\s*(?:<\/tool_call>|<\|?tool_call\|?>)?|<\/tool_call>)/gi;
   while ((match = functionTagRegex.exec(sourceText)) !== null) {
     const name = match[1].trim();
     const rawArgs = match[2].trim();
     let args = {};
     try {
       if (rawArgs && rawArgs.trim()) {
-        args = parseRelaxedJson(rawArgs);
-        if (args && typeof args === 'object') {
-          if (args.arguments && typeof args.arguments === 'object') {
-            args = args.arguments;
-          } else if (args.args && typeof args.args === 'object') {
-            args = args.args;
-          } else if (args.parameters && typeof args.parameters === 'object') {
-            args = args.parameters;
+        const xmlArgs = parseXmlParameterTags(rawArgs);
+        if (xmlArgs) {
+          args = xmlArgs;
+        } else {
+          args = parseRelaxedJson(rawArgs);
+          if (args && typeof args === 'object') {
+            if (args.arguments && typeof args.arguments === 'object') {
+              args = args.arguments;
+            } else if (args.args && typeof args.args === 'object') {
+              args = args.args;
+            } else if (args.parameters && typeof args.parameters === 'object') {
+              args = args.parameters;
+            }
           }
         }
       }
@@ -431,27 +535,11 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
   while ((match = markdownRegex.exec(sourceText)) !== null) {
     const blockContent = match[1].trim();
     try {
-      const parsed = JSON.parse(blockContent);
-      const objects = Array.isArray(parsed) ? parsed : [parsed];
-      let isToolCallBlock = false;
-      const blockCalls = [];
-      
-      for (const obj of objects) {
-        if (obj && typeof obj === 'object') {
-          const toolName = obj.name || obj.tool;
-          if (toolName && typeof toolName === 'string' && tools[toolName]) {
-            isToolCallBlock = true;
-            let args = obj.arguments || obj.args || obj.parameters || {};
-            if (typeof args !== 'object') {
-              args = {};
-            }
-            blockCalls.push({ name: toolName, args });
-          }
-        }
-      }
-      
-      if (isToolCallBlock) {
-        for (const call of blockCalls) {
+      const parsed = parseRelaxedJson(blockContent);
+      const normalized = normalizeParsedToolCallObject(parsed);
+      const validCalls = normalized.filter(c => c.name && tools[c.name]);
+      if (validCalls.length > 0) {
+        for (const call of validCalls) {
           foundCalls.push({ ...call, rawMatch: match[0] });
         }
       }
@@ -463,16 +551,15 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
   // 4. Try parsing the entire text if it's a raw JSON object
   if (foundCalls.length === 0) {
     const trimmed = sourceText.trim();
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
       try {
-        const obj = JSON.parse(trimmed);
-        const toolName = obj.name || obj.tool;
-        if (toolName && typeof toolName === 'string' && tools[toolName]) {
-          let args = obj.arguments || obj.args || obj.parameters || {};
-          if (typeof args !== 'object') {
-            args = {};
+        const parsed = parseRelaxedJson(trimmed);
+        const normalized = normalizeParsedToolCallObject(parsed);
+        const validCalls = normalized.filter(c => c.name && tools[c.name]);
+        if (validCalls.length > 0) {
+          for (const call of validCalls) {
+            foundCalls.push({ ...call, rawMatch: trimmed });
           }
-          foundCalls.push({ name: toolName, args, rawMatch: trimmed });
         }
       } catch (e) {}
     }
@@ -537,6 +624,9 @@ export function detectAndParseTextToolCalls(text, contents = null, thoughtText =
 export function parseCommandsFromText(text) {
   if (!text || typeof text !== 'string') return [];
   const foundCommands = [];
+  const cmdPrefixPattern = '(?:node|npm|npx|ng|yarn|pnpm|bun|python|python3|pip|pip3|flask|uvicorn|cargo|go|sh|bash|zsh|make|cmake|docker|docker-compose|pytest|jest|vitest|mocha|mvn|gradle|dotnet|ruby|bundle|rails|php|composer|git|curl|wget|\\./[^\\s&;]+)';
+  const cmdLineRegex = new RegExp(`^${cmdPrefixPattern}(?:\\s+|$)`, 'i');
+  const inlineChainRegex = new RegExp(`^cd\\s+[^\\s&;]+.*&&\\s*${cmdPrefixPattern}(?:\\s+|$)`, 'i');
 
   // Pattern A: Numbered/bulleted sections like "1. For the Backend... cd ... node ..."
   const sections = text.split(/(?=\d+\.\s*(?:For the|Backend|Frontend|Server|API))/i);
@@ -558,7 +648,7 @@ export function parseCommandsFromText(text) {
     for (const line of lines) {
       if (/^cd\s+[^\s&;]+/i.test(line)) {
         cdPath = line;
-      } else if (/^(?:node|npm|npx|ng|yarn|pnpm|bun|python|python3|flask|uvicorn|cargo|go)\s+/i.test(line)) {
+      } else if (cmdLineRegex.test(line)) {
         runCmd = line;
       }
     }
@@ -598,7 +688,7 @@ export function parseCommandsFromText(text) {
       for (const line of lines) {
         if (/^cd\s+/i.test(line)) {
           cdPath = line;
-        } else if (/^(?:node|npm|npx|ng|yarn|pnpm|bun|python|python3|flask|uvicorn|cargo|go)\s+/i.test(line)) {
+        } else if (cmdLineRegex.test(line)) {
           runCmd = line;
         }
       }
@@ -634,7 +724,7 @@ export function parseCommandsFromText(text) {
       if (/^cd\s+[^\s&;]+/i.test(line)) {
         const cdPart = line;
         let nextRun = null;
-        if (i + 1 < lines.length && /^(?:node|npm|npx|ng|yarn|pnpm|bun|python|python3|flask|uvicorn|cargo|go)\s+/i.test(lines[i + 1])) {
+        if (i + 1 < lines.length && cmdLineRegex.test(lines[i + 1])) {
           nextRun = lines[i + 1];
           i++;
         }
@@ -650,7 +740,7 @@ export function parseCommandsFromText(text) {
             rawMatch: `${cdPart}\n${nextRun}`
           });
         }
-      } else if (/^cd\s+[^\s&;]+.*&&\s*(?:node|npm|npx|ng|yarn|pnpm|bun|python|python3|flask|uvicorn|cargo|go)\s+/i.test(line)) {
+      } else if (inlineChainRegex.test(line)) {
         const name = (line.includes('frontend') || line.includes('ng')) ? 'frontend' : 'backend';
         foundCommands.push({
           name: 'executeCommand',
@@ -2049,17 +2139,21 @@ export class Ollama extends BaseLlm {
     
     if (nativeToolCalls && nativeToolCalls.length > 0) {
       for (const call of nativeToolCalls) {
-        let parsedArgs = call.function.arguments || {};
+        const fnObj = call.function || call;
+        let parsedArgs = fnObj.arguments !== undefined ? fnObj.arguments : (fnObj.parameters || fnObj.args || {});
         if (typeof parsedArgs === 'string') {
           try {
             parsedArgs = JSON.parse(parsedArgs);
           } catch (e) {
-            parsedArgs = {};
+            parsedArgs = parseRelaxedJson(parsedArgs) || {};
           }
+        }
+        if (!parsedArgs || typeof parsedArgs !== 'object') {
+          parsedArgs = {};
         }
         parts.push({
           functionCall: {
-            name: call.function.name,
+            name: fnObj.name || call.name,
             args: parsedArgs
           }
         });

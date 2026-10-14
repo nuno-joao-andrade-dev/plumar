@@ -13,6 +13,7 @@ import {
   stripRedundantToolSchemasFromPrompt,
   readStreamingResponse,
   compactMessagesForContextHeadroom,
+  parseCommandsFromText,
   Ollama
 } from '../src/ollama-client.js';
 import { refeedThinkingProcess } from '../src/agent.js';
@@ -1964,5 +1965,114 @@ test('22. Security, Streaming, Completer, and MCP Enhancements', async (t) => {
   });
 });
 
+test('23. Tool Loop, Parameter Aliases, and Multi-Format Tool Call Parsing', async (t) => {
+  await t.test('searchReplace: should support getLastWorkspaceFile fallback and TargetFile/TargetContent/ReplacementContent aliases', async () => {
+    const tempFile = 'temp_search_replace_alias.txt';
+    try {
+      await tools.writeFile.execute({ filePath: tempFile, content: 'const port = 3000;\nconst host = "localhost";\n' });
 
+      // 1. Omit filePath to verify getLastWorkspaceFile() fallback works without ReferenceError
+      const res1 = await tools.searchReplace.execute({
+        findText: 'const port = 3000;',
+        replaceText: 'const port = 4000;'
+      });
+      assert.strictEqual(res1.success, true);
 
+      // 2. Use TargetFile, TargetContent, ReplacementContent aliases
+      const res2 = await tools.searchReplace.execute({
+        TargetFile: tempFile,
+        TargetContent: 'const host = "localhost";',
+        ReplacementContent: 'const host = "0.0.0.0";'
+      });
+      assert.strictEqual(res2.success, true);
+
+      const finalText = await fs.readFile(tempFile, 'utf-8');
+      assert.ok(finalText.includes('const port = 4000;'));
+      assert.ok(finalText.includes('const host = "0.0.0.0";'));
+    } finally {
+      await fs.rm(tempFile, { force: true });
+    }
+  });
+
+  await t.test('codeFixer: should support top-level operation shorthand without operations array', async () => {
+    const tempFile = 'temp_codefixer_shorthand.js';
+    try {
+      // Shorthand write using TargetFile + CodeContent
+      const resWrite = await tools.codeFixer.execute({
+        TargetFile: tempFile,
+        CodeContent: 'function greet() { return "hi"; }\n'
+      });
+      assert.strictEqual(resWrite.success, true);
+
+      // Shorthand replace using filePath + search + replace without action or operations array
+      const resReplace = await tools.codeFixer.execute({
+        filePath: tempFile,
+        search: 'return "hi";',
+        replace: 'return "hello world";'
+      });
+      assert.strictEqual(resReplace.success, true);
+
+      const content = await fs.readFile(tempFile, 'utf-8');
+      assert.ok(content.includes('return "hello world";'));
+    } finally {
+      await fs.rm(tempFile, { force: true });
+    }
+  });
+
+  await t.test('detectAndParseTextToolCalls: should parse flat JSON args, OpenAI function wrappers, and XML <parameter> tags', async () => {
+    // 1. Flat JSON tool call (arguments at top level instead of nested in "arguments")
+    const flatText = 'Let me run tests:\n```json\n{"name": "executeCommand", "command": "npm test", "background": true}\n```';
+    const flatParsed = detectAndParseTextToolCalls(flatText);
+    assert.strictEqual(flatParsed.calls.length, 1);
+    assert.strictEqual(flatParsed.calls[0].name, 'executeCommand');
+    assert.deepStrictEqual(flatParsed.calls[0].args, { command: 'npm test', background: true });
+
+    // 2. OpenAI style {"type": "function", "function": {...}}
+    const openAiText = '```json\n{"type": "function", "function": {"name": "readFile", "arguments": {"filePath": "package.json"}}}\n```';
+    const openAiParsed = detectAndParseTextToolCalls(openAiText);
+    assert.strictEqual(openAiParsed.calls.length, 1);
+    assert.strictEqual(openAiParsed.calls[0].name, 'readFile');
+    assert.deepStrictEqual(openAiParsed.calls[0].args, { filePath: 'package.json' });
+
+    // 3. Qwen/Hermes/Claude XML <function=name><parameter=key>val</parameter></function>
+    const xmlText = '<function=writeFile>\n<parameter=filePath>src/app.js</parameter>\n<parameter=content>console.log("ok");</parameter>\n</function>';
+    const xmlParsed = detectAndParseTextToolCalls(xmlText);
+    assert.strictEqual(xmlParsed.calls.length, 1);
+    assert.strictEqual(xmlParsed.calls[0].name, 'writeFile');
+    assert.deepStrictEqual(xmlParsed.calls[0].args, { filePath: 'src/app.js', content: 'console.log("ok");' });
+  });
+
+  await t.test('wrapFunctionTool: should reset read/verify history after file mutation so read -> edit -> read -> edit -> read never triggers false loop block', async () => {
+    resetTurnToolHistory();
+    const wrappedRead = wrapFunctionTool(tools.readFile);
+    const wrappedWrite = wrapFunctionTool(tools.writeFile);
+    const tempFile = 'temp_read_write_cycle.txt';
+
+    try {
+      await wrappedWrite.execute({ filePath: tempFile, content: 'v1' });
+      const r1 = await wrappedRead.execute({ filePath: tempFile });
+      assert.strictEqual(r1.success, true);
+      assert.strictEqual(r1.content, 'v1');
+
+      await wrappedWrite.execute({ filePath: tempFile, content: 'v2' });
+      const r2 = await wrappedRead.execute({ filePath: tempFile });
+      assert.strictEqual(r2.success, true);
+      assert.strictEqual(r2.content, 'v2');
+
+      await wrappedWrite.execute({ filePath: tempFile, content: 'v3' });
+      const r3 = await wrappedRead.execute({ filePath: tempFile });
+      assert.strictEqual(r3.success, true, '3rd readFile after mutations must NOT be blocked by loop detection');
+      assert.strictEqual(r3.content, 'v3');
+    } finally {
+      await fs.rm(tempFile, { force: true });
+      resetTurnToolHistory();
+    }
+  });
+
+  await t.test('parseCommandsFromText: should recognize expanded CLI prefixes like pytest, docker-compose, make, and ./scripts', async () => {
+    const cmds = parseCommandsFromText('```bash\ncd backend\npytest -q\n```');
+    assert.strictEqual(cmds.length, 1);
+    assert.strictEqual(cmds[0].name, 'executeCommand');
+    assert.strictEqual(cmds[0].args.command, 'cd backend && pytest -q');
+  });
+});

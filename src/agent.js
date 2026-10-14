@@ -403,9 +403,14 @@ When the user requests to read, analyze, extract text, or perform OCR on an imag
           });
         }
 
-        if (thoughtParts.length > 0 || hasFnCallInEvent || textVal.trim()) {
+        if (thoughtParts.length > 0) {
           lastModelThoughtText = thoughtParts.map(p => p.text || '').join('\n').trim();
-          lastModelHadFunctionCall = hasFnCallInEvent;
+        }
+        if (hasFnCallInEvent) {
+          lastModelHadFunctionCall = true;
+          lastModelThoughtText = '';
+        } else if (thoughtParts.length > 0 || textVal.trim()) {
+          lastModelHadFunctionCall = false;
         }
         
         if (textVal && textVal.trim()) {

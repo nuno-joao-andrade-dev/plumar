@@ -16,16 +16,26 @@ export const developmentTools = {
     name: 'processManager',
     description: 'Manage long-running background processes and services (e.g. backend servers, web development servers, databases, watchers). Supports starting, listing, reading logs, and stopping background services.',
     parameters: z.object({
-      action: z.enum(['start', 'list', 'logs', 'stop']).describe('The action to perform: "start" to launch a background service, "list" to list active services, "logs" to read recent stdout/stderr output, "stop" to terminate a service.'),
+      action: z.enum(['start', 'list', 'logs', 'stop']).optional().default('start').describe('The action to perform: "start" to launch a background service, "list" to list active services, "logs" to read recent stdout/stderr output, "stop" to terminate a service.'),
       command: z.string().optional().describe('The shell command to execute in the background (required for "start", e.g. "npm run start" or "node server.js").'),
+      cmd: z.string().optional().describe('Alternative parameter name for command'),
+      commandLine: z.string().optional().describe('Alternative parameter name for command'),
+      CommandLine: z.string().optional().describe('Alternative parameter name for command'),
+      script: z.string().optional().describe('Alternative parameter name for command'),
       name: z.string().optional().describe('A friendly name or label for the process (e.g. "backend", "frontend", "api-server").'),
       processId: z.string().optional().describe('The process ID to inspect or stop (e.g. "proc-1").'),
       pid: z.number().int().optional().describe('Process ID to inspect or stop.'),
       lines: z.number().int().optional().default(50).describe('Number of recent log lines to retrieve (for "logs" action, default 50).'),
       cwd: z.string().optional().describe('Optional working directory relative to workspace.'),
+      directory: z.string().optional().describe('Alternative parameter name for cwd'),
+      workingDirectory: z.string().optional().describe('Alternative parameter name for cwd'),
     }),
-    execute: async ({ action, command, name, processId, pid, lines = 50, cwd }) => {
+    execute: async (args = {}) => {
       try {
+        const action = args.action || (args.command || args.cmd || args.commandLine || args.CommandLine || args.script ? 'start' : 'list');
+        const command = args.command || args.cmd || args.commandLine || args.CommandLine || args.script;
+        const cwd = args.cwd || args.directory || args.workingDirectory;
+        const { name, processId, pid, lines = 50 } = args;
         if (action === 'start') {
           if (!command) {
             return { success: false, error: 'Command is required for "start" action.' };
@@ -745,8 +755,20 @@ export const developmentTools = {
       file: z.string().optional().describe('Alternative parameter name for filePath'),
       filename: z.string().optional().describe('Alternative parameter name for filePath'),
       targetFile: z.string().optional().describe('Alternative parameter name for filePath'),
+      TargetFile: z.string().optional().describe('Alternative parameter name for filePath'),
+      action: z.enum(['replace', 'insert_before', 'insert_after', 'write', 'append']).optional().describe('Optional top-level shorthand action when operations array is omitted.'),
+      search: z.string().optional().describe('Optional top-level shorthand search pattern when operations array is omitted.'),
+      find: z.string().optional().describe('Alternative top-level parameter name for search'),
+      findText: z.string().optional().describe('Alternative top-level parameter name for search'),
+      pattern: z.string().optional().describe('Alternative top-level parameter name for search'),
+      replace: z.string().optional().describe('Optional top-level shorthand replacement content when operations array is omitted.'),
+      replaceText: z.string().optional().describe('Alternative top-level parameter name for replace'),
+      content: z.string().optional().describe('Optional top-level shorthand content to write/replace when operations array is omitted.'),
+      CodeContent: z.string().optional().describe('Alternative top-level parameter name for content'),
+      code: z.string().optional().describe('Alternative top-level parameter name for content'),
+      text: z.string().optional().describe('Alternative top-level parameter name for content'),
       operations: z.array(z.object({
-        action: z.enum(['replace', 'insert_before', 'insert_after', 'write', 'append']).describe('The action to perform on the target file section.'),
+        action: z.enum(['replace', 'insert_before', 'insert_after', 'write', 'append']).optional().describe('The action to perform on the target file section (defaults to "replace" if search is provided, or "write" otherwise).'),
         search: z.string().optional().describe('The code block or pattern to match. Optional for "replace", "insert_before", or "insert_after"; if omitted, the entire targeted section (anchors/lines/file) is used as the match.'),
         find: z.string().optional().describe('Alternative parameter name for search'),
         findText: z.string().optional().describe('Alternative parameter name for search'),
@@ -754,6 +776,9 @@ export const developmentTools = {
         replace: z.string().optional().describe('The replacement code content (used for "replace").'),
         content: z.string().optional().describe('The content to write, append, replace, or insert.'),
         replaceText: z.string().optional().describe('Alternative parameter name for replace'),
+        CodeContent: z.string().optional().describe('Alternative parameter name for content'),
+        code: z.string().optional().describe('Alternative parameter name for content'),
+        text: z.string().optional().describe('Alternative parameter name for content'),
         filePath: z.string().optional().describe('Optional file path target for this operation.'),
         path: z.string().optional().describe('Alternative parameter name for filePath'),
         file: z.string().optional().describe('Alternative parameter name for filePath'),
@@ -784,10 +809,9 @@ export const developmentTools = {
       lintAndFormat: z.boolean().optional().default(true).describe('If true, runs Prettier formatting on the files after modifications.'),
       dryRun: z.boolean().optional().default(false).describe('If true, simulates the changes and returns a diff without modifying files.')
     }),
-    execute: async (args) => {
+    execute: async (args = {}) => {
       const {
         filePath,
-        operations,
         files,
         correlate,
         propagateCorrelations,
@@ -795,6 +819,40 @@ export const developmentTools = {
         lintAndFormat = true,
         dryRun = false
       } = args;
+
+      let operations = Array.isArray(args.operations) ? args.operations : undefined;
+      if ((!operations || operations.length === 0) && (
+        args.action !== undefined ||
+        args.search !== undefined ||
+        args.find !== undefined ||
+        args.findText !== undefined ||
+        args.pattern !== undefined ||
+        args.replace !== undefined ||
+        args.replaceText !== undefined ||
+        args.content !== undefined ||
+        args.CodeContent !== undefined ||
+        args.code !== undefined ||
+        args.text !== undefined
+      )) {
+        const hasSearch = args.search !== undefined || args.find !== undefined || args.findText !== undefined || args.pattern !== undefined;
+        operations = [{
+          action: args.action || (hasSearch ? 'replace' : 'write'),
+          search: args.search,
+          find: args.find,
+          findText: args.findText,
+          pattern: args.pattern,
+          replace: args.replace,
+          replaceText: args.replaceText,
+          content: args.content !== undefined ? args.content : (args.CodeContent !== undefined ? args.CodeContent : (args.code !== undefined ? args.code : args.text)),
+          startAnchor: args.startAnchor,
+          endAnchor: args.endAnchor,
+          startLine: args.startLine,
+          endLine: args.endLine,
+          isRegex: args.isRegex,
+          regexFlags: args.regexFlags,
+          unescape: args.unescape
+        }];
+      }
 
       try {
         const fileContents = {}; // relativePath -> string
@@ -997,7 +1055,7 @@ export const developmentTools = {
         };
 
         // Resolve target file path from root arguments, files array, operations array, or active workspace file
-        let targetFilePath = filePath || args.path || args.file || args.filename || args.targetFile || args.targetFilePath;
+        let targetFilePath = filePath || args.path || args.file || args.filename || args.targetFile || args.TargetFile || args.targetFilePath;
 
         if (!targetFilePath && Array.isArray(files) && files.length === 1 && typeof files[0] === 'string') {
           targetFilePath = files[0];
@@ -1005,8 +1063,8 @@ export const developmentTools = {
 
         if (!targetFilePath && Array.isArray(operations)) {
           for (const op of operations) {
-            if (op && (op.filePath || op.path || op.file || op.filename || op.targetFile)) {
-              targetFilePath = op.filePath || op.path || op.file || op.filename || op.targetFile;
+            if (op && (op.filePath || op.path || op.file || op.filename || op.targetFile || op.TargetFile)) {
+              targetFilePath = op.filePath || op.path || op.file || op.filename || op.targetFile || op.TargetFile;
               break;
             }
           }
@@ -1083,7 +1141,18 @@ export const developmentTools = {
             const unescape = op.unescape !== false;
 
             const searchVal = op.search !== undefined ? op.search : (op.find !== undefined ? op.find : (op.findText !== undefined ? op.findText : (op.pattern !== undefined ? op.pattern : undefined)));
-            const replaceOrContentVal = op.replace !== undefined ? op.replace : (op.content !== undefined ? op.content : (op.replaceText !== undefined ? op.replaceText : ''));
+            const replaceOrContentVal = op.replace !== undefined
+              ? op.replace
+              : (op.content !== undefined
+                  ? op.content
+                  : (op.replaceText !== undefined
+                      ? op.replaceText
+                      : (op.CodeContent !== undefined
+                          ? op.CodeContent
+                          : (op.code !== undefined
+                              ? op.code
+                              : (op.text !== undefined ? op.text : '')))));
+            const opAction = op.action || (searchVal !== undefined ? 'replace' : 'write');
 
             let targetStartIdx = 0;
             let targetEndIdx = fileContent.length;
@@ -1126,13 +1195,13 @@ export const developmentTools = {
             let targetSection = fileContent.slice(targetStartIdx, targetEndIdx);
             const suffix = fileContent.slice(targetEndIdx);
 
-            if (op.action === 'write') {
+            if (opAction === 'write') {
               targetSection = unescape ? unescapeString(replaceOrContentVal) : replaceOrContentVal;
             } 
-            else if (op.action === 'append') {
+            else if (opAction === 'append') {
               targetSection = targetSection + (unescape ? unescapeString(replaceOrContentVal) : replaceOrContentVal);
             } 
-            else if (op.action === 'replace') {
+            else if (opAction === 'replace') {
               const finalReplace = unescape ? unescapeString(replaceOrContentVal) : replaceOrContentVal;
 
               if (searchVal === undefined) {
@@ -1150,7 +1219,7 @@ export const developmentTools = {
                 targetSection = targetSection.split(finalSearch).join(finalReplace);
               }
             } 
-            else if (op.action === 'insert_before') {
+            else if (opAction === 'insert_before') {
               const finalContent = unescape ? unescapeString(replaceOrContentVal) : replaceOrContentVal;
 
               if (searchVal === undefined) {
@@ -1164,7 +1233,7 @@ export const developmentTools = {
                 targetSection = targetSection.slice(0, idx) + finalContent + targetSection.slice(idx);
               }
             } 
-            else if (op.action === 'insert_after') {
+            else if (opAction === 'insert_after') {
               const finalContent = unescape ? unescapeString(replaceOrContentVal) : replaceOrContentVal;
 
               if (searchVal === undefined) {
