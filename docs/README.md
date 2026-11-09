@@ -11,6 +11,9 @@ Explore the following sections to understand, configure, and extend this local A
 ### 🚀 [Getting Started](file:///home/nandrade/localmodel/docs/getting-started.md)
 Learn about prerequisites, model pulling, initial setup, running the REPL, and configuring environment variables/flags for custom logging.
 
+### 💎 [Run Gemma locally](gemma.md)
+Pull Gemma 4 or Gemma 3 with Ollama, start plumar with it, and pick the right size for your machine.
+
 ### 🏛️ [System Architecture](file:///home/nandrade/localmodel/docs/architecture.md)
 Take a deep dive into the decoupled modular architecture, path-traversal safety boundaries, and our custom manual turn-by-turn orchestration loop designed for maximum local model stability.
 
