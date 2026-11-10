@@ -18,11 +18,7 @@ ollama pull gemma4:e4b
 
 ## 2. Run plumar with it
 
-Interactive REPL: start `plumar` and pick the model from the startup menu, or switch later with:
-
-```text
-/model gemma4:e4b
-```
+Interactive REPL: start `plumar` and pick the model from the startup menu. To switch later, type `/model` to open the same picker.
 
 One-shot prompt from the shell:
 
@@ -34,7 +30,7 @@ plumar -m gemma4:e4b "explain what src/agent.js does in three bullet points"
 
 ## 3. Which size for which machine
 
-Download sizes come from the [Ollama library](https://ollama.com/library/gemma4). The memory column is a rough guide: the model file plus room for the context window and the rest of your system. On Apple Silicon this is unified memory, on other machines RAM or VRAM.
+Download sizes come from the [Ollama library](https://ollama.com/library/gemma4). The Good fit column is a rough guide: the model file plus room for the context window and the rest of your system. On Apple Silicon this is unified memory, on other machines RAM or VRAM. Using LM Studio instead of Ollama? Load the matching Gemma GGUF there; the tags below are Ollama names.
 
 ### Gemma 4 (recommended for plumar)
 
@@ -46,15 +42,15 @@ Gemma 4 supports native tool calling and thinking in Ollama, so plumar's tools w
 | `gemma4:e4b` (`latest`) | 6.6 GB | 128K | 16 GB machines, everyday coding |
 | `gemma4:12b` | 7.7 GB | 256K | 16 to 24 GB, better reasoning on larger files |
 | `gemma4:26b` | 16 GB | 256K | 32 GB, mixture of experts (about 4B active), fast for its size |
-| `gemma4:31b` | 19 GB | 256K | 32 GB and up, strongest dense model |
+| `gemma4:31b` | 19 GB | 256K | 32 GB and up, largest dense model |
 
 ### Gemma 3
 
-Gemma 3 runs fine for chat and smaller machines. Ollama ships it [without native tool calling](https://ollama.com/library/gemma3), so plumar falls back to text-based tool calls. You will see `retrying in text-only mode...` on each turn; that is expected.
+Gemma 3 runs fine for chat and smaller machines. Ollama ships it [without native tool calling](https://ollama.com/library/gemma3), so plumar falls back to text-based tool calls. You will see `retrying in text-only mode...` on each turn (one extra round trip); that is expected.
 
 | Tag | Download | Context | Input | Good fit |
 |---|---|---|---|---|
-| `gemma3:270m` | 292 MB | 32K | Text | Tiny experiments, CI smoke tests |
+| `gemma3:270m` | 292 MB | 32K | Text | Tiny experiments, chat only; too small for reliable tool use |
 | `gemma3:1b` | 806 MB | 32K | Text | Any laptop, short answers |
 | `gemma3:4b` (`latest`) | 3.4 GB | 128K | Text, image | 8 GB machines |
 | `gemma3:12b` | 8.2 GB | 128K | Text, image | 16 GB machines |
@@ -70,7 +66,7 @@ Gemma 3 runs fine for chat and smaller machines. Ollama ships it [without native
   /parameter set num_ctx 8192
   ```
 
-- **Temperature.** The Gemma team recommends `temperature 1.0`, `top_k 64` and `top_p 0.95`. Ollama's Gemma models already set `top_k` and `top_p`; plumar's chat mode sets the temperature (for example 0.2 in `code` mode). For open-ended writing, use `/mode creative` or:
+- **Temperature.** The [Gemma 4 model page](https://ollama.com/library/gemma4) recommends `temperature 1.0`, `top_k 64` and `top_p 0.95`, and Ollama's Gemma tags already set `top_k` and `top_p` to these values. plumar's chat mode sets the temperature: the default `coder` mode uses 0.2, which suits code, and `creative` uses 0.9. For open-ended writing, use `/mode creative` or:
 
   ```text
   /parameter set temperature 1.0
