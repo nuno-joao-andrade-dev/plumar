@@ -23,6 +23,8 @@ To pull a model locally, open your terminal and run:
 ollama pull gemma4
 ```
 
+Not sure which Gemma size fits your machine? See [Run Gemma locally with plumar](gemma.md).
+
 > [!TIP]
 > If you have other models installed (e.g., `llama3`, `qwen2.5`, `mistral`, `phi3`, etc.), Plumar is equipped with **Interactive Model Discovery** on startup. It will detect all of your local models and allow you to select your preferred one dynamically!
 
